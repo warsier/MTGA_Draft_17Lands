@@ -241,20 +241,22 @@ def export_draft_to_csv(history, dataset, picked_cards_map):
     )
     if not history:
         return output.getvalue()
-    user_picks = picked_cards_map[0] if picked_cards_map else []
+    user_picks = set(str(x) for x in (picked_cards_map[0] if picked_cards_map else []))
 
     for entry in history:
-        for cid in entry["Cards"]:
+        entry_picked = set(str(x) for x in entry.get("Picked", []))
+        for cid in entry.get("Cards", []):
             c_list = dataset.get_data_by_id([cid])
             if not c_list:
                 continue
             c = c_list[0]
+            str_cid = str(cid)
             stats = c.get("deck_colors", {}).get("All Decks", {})
             writer.writerow(
                 [
                     entry["Pack"],
                     entry["Pick"],
-                    "1" if str(cid) in user_picks else "0",
+                    "1" if (str_cid in entry_picked or str_cid in user_picks) else "0",
                     c.get("name", ""),
                     "".join(c.get("colors", [])),
                     str(c.get("cmc", "")),
@@ -272,18 +274,20 @@ def export_draft_to_json(history, dataset, picked_cards_map):
     import json
 
     output = []
-    user_picks = picked_cards_map[0] if picked_cards_map else []
+    user_picks = set(str(x) for x in (picked_cards_map[0] if picked_cards_map else []))
     for entry in history:
         pack_data = {"Pack": entry["Pack"], "Pick": entry["Pick"], "Cards": []}
-        for cid in entry["Cards"]:
+        entry_picked = set(str(x) for x in entry.get("Picked", []))
+        for cid in entry.get("Cards", []):
             c_list = dataset.get_data_by_id([cid])
             if not c_list:
                 continue
             c = c_list[0]
+            str_cid = str(cid)
             pack_data["Cards"].append(
                 {
                     "Name": c.get("name", ""),
-                    "Picked": (str(cid) in user_picks),
+                    "Picked": (str_cid in entry_picked or str_cid in user_picks),
                     "Colors": c.get("colors", []),
                     "CMC": c.get("cmc", 0),
                     "Type": c.get("types", []),

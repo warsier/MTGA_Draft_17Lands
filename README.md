@@ -2,7 +2,7 @@
 
 Magic: The Gathering Arena draft tool that utilizes 17Lands data.
 
-**Version 4.23:** Sealed session isolation, clipboard import and Auto Lands fixes, more accurate mana simulation, automatic event scheduling from MTGpile, and safer dataset downloads and event selection. See the [release notes](release_notes.txt) for details.
+**Version 4.24-homebrew:** High-performance edition tracking upstream Version 4.24. Includes nogil Numba JIT Monte Carlo simulation, zero-allocation scalar kernels, marginal deck scoring memoization, synchronous disk I/O elimination, throttled UI refresh rates, consolidated deck views, hardened ETL validation, and 100% test pass rate. See the [release notes](release_notes.txt) for details.
 
 **This application will automatically support new sets as soon as the sets are released on Arena _and_ the data is available on the [17Lands card ratings](https://www.17lands.com/card_ratings) page.**
 
@@ -28,7 +28,7 @@ Magic: The Gathering Arena draft tool that utilizes 17Lands data.
 
 Because this is a free, open-source community project, the application is not signed with a paid Apple Developer Certificate ($100/year). As a result, macOS and Windows SmartScreen will flag the application as an "Unidentified Developer."
 
-Our GitHub Actions pipeline generates **SHA-256 checksums** for release assets and includes them in the release notes on the [Releases page](https://github.com/unrealities/MTGA_Draft_17Lands/releases). Compare your downloaded file's hash with its published checksum to detect a mismatch.
+Our GitHub Actions pipeline generates **SHA-256 checksums** for release assets and includes them in the release notes on the [Releases page](https://github.com/warsier/MTGA_Draft_17Lands/releases). Compare your downloaded file's hash with its published checksum to detect a mismatch.
 
 Automatic dataset updates accept only dataset filenames confined to the Sets folder. Downloads must match the manifest's SHA-256 checksum, stay within size limits, and contain valid dataset metadata and card ratings before replacing cached data. Rejected updates keep the cached copy and show a sync message. These checks protect file integrity; the publisher is still trusted through HTTPS and GitHub Pages.
 
@@ -44,7 +44,7 @@ macOS actively quarantines unsigned apps downloaded from the internet. To run th
 
 ## Run Steps: Standalone App (Windows / macOS / Linux)
 
-- **Step 1:** Download the latest release for your operating system from the [releases page](https://github.com/unrealities/MTGA_Draft_17Lands/releases).
+- **Step 1:** Download the latest release for your operating system from the [releases page](https://github.com/warsier/MTGA_Draft_17Lands/releases).
 - **Step 2:** Install/Extract the application:
   - **Windows:** Unzip and double-click the installer executable. *(Run as administrator if installing to restricted folders like Program Files).*
   - **macOS:** Unzip the downloaded file and drag `MTGA_Draft_Tool.app` to your Applications folder. *(See the Security section above if macOS blocks the app from running).*
@@ -60,7 +60,7 @@ macOS actively quarantines unsigned apps downloaded from the internet. To run th
 
 ## Run Steps: Python (Windows / macOS / Linux)
 
-- **Step 1:** [Download](https://github.com/unrealities/MTGA_Draft_17Lands/archive/refs/heads/main.zip) and unzip the repository.
+- **Step 1:** [Download](https://github.com/warsier/MTGA_Draft_17Lands/archive/refs/heads/main.zip) and unzip the repository.
 - **Step 2:** Download and install **Python 3.12**.
 - **Step 3:** Confirm that you're running Python 3.12 by opening the terminal and entering `python --version` (or `python3 --version`).
 - **Step 4:** Install the Poetry package manager by entering `pip install poetry`.
@@ -82,7 +82,7 @@ macOS actively quarantines unsigned apps downloaded from the internet. To run th
 - **AI Monte Carlo Auto-Optimizer:** Click the "Auto-Optimize Deck" button to unleash a background simulation engine that mathematically tests different deck permutations (16 lands vs 17 lands, swapping out clunky 5-drops for efficient 2-drops) across 10,000 simulated games to find the perfect 40-card configuration.
 - **Sealed Studio:** A fully interactive drag-and-drop workspace specifically tailored for Sealed deckbuilding. Features an AI Shell Generator that automatically builds the top 3 mathematically optimal deck variants for your specific pool (e.g., Best 2-Color, Greedy Splash, Aggro). Saved sessions are isolated by Arena entry, restored decks respect the current pool, and clipboard imports keep sideboard cards out of the main deck.
 - **Mana Base Tools:** Auto Lands counts every card copy when filling a 40-card deck and allocating colors. Mana simulation uses the colors a source actually produces, one land drop per turn, and a shared mana budget for deploying ramp cards.
-- **Automated Cloud Datasets:** The Cloud ETL Pipeline compiles and distributes the latest 17Lands telemetry every day, using [MTGpile's Arena schedule](https://mtgpile.com/api/v1/events/arena/all.json), compiled from Wizards of the Coast's published schedules, to select active supported sets and formats. When you open the app, it syncs the data for active Arena events in the background. View the [live dataset calendar](https://unrealities.github.io/MTGA_Draft_17Lands/calendar.html), including the source update date, or read the [ETL documentation](docs/05-server-etl-pipeline.md).
+- **Automated Cloud Datasets:** The Cloud ETL Pipeline compiles and distributes the latest 17Lands telemetry every day, using [MTGpile's Arena schedule](https://mtgpile.com/api/v1/events/arena/all.json), compiled from Wizards of the Coast's published schedules, to select active supported sets and formats. When you open the app, it syncs the data for active Arena events in the background. View the [live dataset calendar](https://warsier.github.io/MTGA_Draft_17Lands/calendar.html), including the source update date, or read the [ETL documentation](docs/05-server-etl-pipeline.md).
 - **Event-Matched Statistics:** Startup and live scanning select statistics for the detected set and event format. A matching dataset you previously selected is retained; otherwise All users is preferred, followed by an available group for the same event. If no dataset matches the event, prior statistics are cleared; download the missing event from Datasets or select a dataset manually.
 - **Zero-Day Card Recognition:** Missing card metadata is resolved from your local MTG Arena SQLite database, with Scryfall as a fallback, in a background worker. The draft window stays responsive, and failed lookups retry automatically instead of permanently hiding cards.
 - **Mini Mode:** Click the `Mini Mode` button to hide the main dashboard and display a compact, draggable, always-on-top window. Perfect for single-monitor setups or playing seamlessly over the Arena client.

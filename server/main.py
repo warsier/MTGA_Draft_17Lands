@@ -222,6 +222,7 @@ def run_pipeline():
                     set_code,
                     draft_format,
                     f"Failed validation, kept prior data: {critical_issues[0]}",
+                    user_group=user_group,
                 )
                 continue
             elif critical_issues:
@@ -261,8 +262,14 @@ def run_pipeline():
                 f"Failed processing {set_code} {draft_format} ({user_group}): {e}"
             )
             logger.debug(traceback.format_exc())
-            report.record_skipped(set_code, draft_format, f"Processing failed: {e}")
+            report.record_skipped(
+                set_code,
+                draft_format,
+                f"Processing failed: {e}",
+                user_group=user_group,
+            )
 
+    validate_manifest(manifest)
     save_manifest(manifest)
     report.record_warehouse_state(manifest)
 

@@ -103,18 +103,23 @@ class DraftAdvisor:
 
         self.base_deck_score = 0.0
         self.color_options = []
+        self.base_pair_scores = {}
         if pack_number >= 3 and len(self.pool) >= 23:
             try:
                 from src.card_logic import identify_top_pairs
 
                 self.color_options = identify_top_pairs(self.pool, self.metrics)
-                self.base_deck_score = self._get_fast_best_deck_score(
-                    self.pool, self.color_options
+                for pair in self.color_options:
+                    pair_key = tuple(sorted(pair))
+                    self.base_pair_scores[pair_key] = self._score_pair_deck(self.pool, pair)
+                self.base_deck_score = (
+                    max(self.base_pair_scores.values()) if self.base_pair_scores else 0.0
                 )
             except Exception as e:
                 logger.warning(f"Advisor base deck scoring error: {e}")
                 self.base_deck_score = 0.0
                 self.color_options = []
+                self.base_pair_scores = {}
 
         recommendations = []
         for card in pack_cards:
@@ -130,10 +135,11 @@ class DraftAdvisor:
                 reasons, synergy_bonus = [], 0.0
 
                 # --- STEP 1: Blended Base Score (With Bayesian Smoothing & Signals) ---
-                base_score = self._calculate_weighted_score(card, safe_pick)
+                overall_pick = (pack_number - 1) * 15 + safe_pick
+                base_score = self._calculate_weighted_score(card, overall_pick)
 
-                # --- STEP 2: Bomb Detection ---
-                z_score = (raw_gihwr - pack_mean) / pack_std
+                # --- STEP 2: Bomb Detection (Set-Relative Z-Score) ---
+                z_score = (raw_gihwr - self.global_mean) / max(0.1, self.global_std)
                 iwd_mult = (
                     1.15
                     if (raw_iwd > self.IWD_PREMIUM_THRESHOLD and z_score > 1.0)
@@ -223,10 +229,13 @@ class DraftAdvisor:
                 deck_improvement_bonus = 0.0
                 if pack_number >= 3 and len(self.pool) >= 23:
                     try:
-                        test_pool = self.pool + [card]
-                        new_score = self._get_fast_best_deck_score(
-                            test_pool, self.color_options
-                        )
+                        if self.base_pair_scores:
+                            new_score = self._get_fast_candidate_deck_score(card)
+                        else:
+                            test_pool = self.pool + [card]
+                            new_score = self._get_fast_best_deck_score(
+                                test_pool, self.color_options
+                            )
                         improvement = new_score - self.base_deck_score
                         if improvement > 0.1:
                             deck_improvement_bonus = improvement * 3.0
@@ -452,11 +461,13 @@ class DraftAdvisor:
             ):
                 return 1.3, "Enables Bomb Splash"
 
-            return (
-                (1.15, "Premium Fixing")
-                if pack == 1 and len(card.get("colors", [])) > 1
-                else (1.0, "")
-            )
+            if pack == 1:
+                if len(card.get("colors", [])) > 1:
+                    return 1.15, "Premium Fixing"
+                elif "Land" in types:
+                    return 1.08, "Fixing Priority"
+            elif "Land" in types:
+                return 1.0, ""
 
         # 5. Removal Check
         if "removal" in tags:
@@ -575,7 +586,8 @@ class DraftAdvisor:
             if alsa <= pick:
                 return 1.0, "", 0.0
             coeffs = constants.WHEEL_COEFFICIENTS[min(pick - 1, 5)]
-            context_prob = float(np.polyval(coeffs, alsa))
+            c0, c1, c2, c3 = coeffs
+            context_prob = ((c0 * alsa + c1) * alsa + c2) * alsa + c3
             if rank_in_pack == 0:
                 context_prob *= 0.10
             elif rank_in_pack <= 2:
@@ -598,7 +610,12 @@ class DraftAdvisor:
             arch_wr = float(arch_stats.get("gihwr", global_wr))
 
             # BAYESIAN SMOOTHING: Confidently blend global & archetype win rates based on sample size
-            samples = int(arch_stats.get("samples", 0))
+            samples = int(
+                arch_stats.get("samples")
+                or arch_stats.get("gih")
+                or arch_stats.get("ngd")
+                or 0
+            )
             confidence = min(1.0, samples / 1000.0)
             trusted_arch_wr = (arch_wr * confidence) + (global_wr * (1.0 - confidence))
 
@@ -625,36 +642,80 @@ class DraftAdvisor:
         except:
             return 0.0
 
-    def _get_fast_best_deck_score(
-        self, pool: List[Dict], color_options: List[List[str]]
-    ) -> float:
+    def _score_pair_deck(self, pool: List[Dict], main_colors: List[str]) -> float:
         from src.card_logic import (
             build_variant_consistency,
             build_variant_greedy,
             build_variant_curve,
+            calculate_holistic_score,
+        )
+
+        best = 0.0
+        for builder in [build_variant_consistency, build_variant_curve]:
+            deck = builder(pool, main_colors, self.metrics)
+            if deck:
+                score, _ = calculate_holistic_score(
+                    deck, main_colors, len(pool), self.metrics
+                )
+                if score > best:
+                    best = score
+
+        deck, splash = build_variant_greedy(pool, main_colors, self.metrics)
+        if deck:
+            target_colors = main_colors + [splash] if splash else main_colors
+            score, _ = calculate_holistic_score(
+                deck, target_colors, len(pool), self.metrics
+            )
+            if score > best:
+                best = score
+
+        return best
+
+    def _get_fast_candidate_deck_score(self, candidate_card: Dict) -> float:
+        from src.card_logic import (
+            build_variant_soup,
+            calculate_holistic_score,
+        )
+
+        card_colors = set(candidate_card.get("colors", []))
+        test_pool = self.pool + [candidate_card]
+        best_score = 0.0
+
+        for pair in self.color_options:
+            pair_key = tuple(sorted(pair))
+            pair_set = set(pair)
+            # Re-evaluate only if candidate matches pair, is colorless/land, or is single-color splash
+            if not card_colors or card_colors.issubset(pair_set) or len(card_colors) == 1:
+                score = self._score_pair_deck(test_pool, pair)
+            else:
+                score = self.base_pair_scores.get(pair_key, 0.0)
+            if score > best_score:
+                best_score = score
+
+        deck, soup_colors = build_variant_soup(test_pool, self.metrics)
+        if deck:
+            target_colors = soup_colors[:3] if soup_colors else ["All Decks"]
+            score, _ = calculate_holistic_score(
+                deck, target_colors, len(test_pool), self.metrics
+            )
+            if score > best_score:
+                best_score = score
+
+        return best_score
+
+    def _get_fast_best_deck_score(
+        self, pool: List[Dict], color_options: List[List[str]]
+    ) -> float:
+        from src.card_logic import (
             build_variant_soup,
             calculate_holistic_score,
         )
 
         best_score = 0.0
         for main_colors in color_options:
-            for builder in [build_variant_consistency, build_variant_curve]:
-                deck = builder(pool, main_colors, self.metrics)
-                if deck:
-                    score, _ = calculate_holistic_score(
-                        deck, main_colors, len(pool), self.metrics
-                    )
-                    if score > best_score:
-                        best_score = score
-
-            deck, splash = build_variant_greedy(pool, main_colors, self.metrics)
-            if deck:
-                target_colors = main_colors + [splash] if splash else main_colors
-                score, _ = calculate_holistic_score(
-                    deck, target_colors, len(pool), self.metrics
-                )
-                if score > best_score:
-                    best_score = score
+            score = self._score_pair_deck(pool, main_colors)
+            if score > best_score:
+                best_score = score
 
         deck, soup_colors = build_variant_soup(pool, self.metrics)
         if deck:

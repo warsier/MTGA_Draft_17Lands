@@ -11,9 +11,10 @@ import os
 import json
 from typing import Dict, List
 from src.utils import is_cache_stale
-from src.constants import BASE_DIR
+from src.constants import BASE_DIR, SCRYFALL_TAG_QUERIES
 
 logger = logging.getLogger(__name__)
+_ORIGINAL_REQUESTS_GET = requests.get
 
 
 class ScryfallTagger:
@@ -23,22 +24,11 @@ class ScryfallTagger:
         "Accept": "application/json",
     }
     CACHE_DIR = os.path.join(BASE_DIR, "Temp", "RawCache")
-
-    TAG_QUERIES = {
-        "removal": "otag:removal OR otag:board-wipe OR otag:pacifism OR otag:counterspell OR otag:bounce OR otag:edict OR otag:burn",
-        "combat_trick": "otag:combat-trick OR otag:pump-spell",
-        "enhancement": "otag:aura OR otag:equipment OR otag:vehicle",
-        "fixing_ramp": "otag:mana-fixing OR otag:fetchland OR otag:mana-dork OR otag:mana-rock OR otag:treasure OR otag:ramp",
-        "card_advantage": "otag:card-draw OR otag:card-selection OR otag:recursion OR otag:tutor OR otag:cantrip OR kw:investigate OR kw:surveil",
-        "evasion": "otag:evasion OR kw:flying OR kw:menace OR kw:trample",
-        "mana_sink": "otag:mana-sink",
-        "token_maker": "otag:token-generator",
-        "lifegain": "otag:lifegain OR kw:lifelink",
-        "protection": "otag:hexproof-granter OR otag:indestructible-granter OR otag:protection-spell OR otag:blink OR otag:flicker",
-        "hate": "otag:graveyard-hate OR otag:artifact-destruction OR otag:enchantment-destruction",
-    }
+    TAG_QUERIES = SCRYFALL_TAG_QUERIES
 
     def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update(self.HEADERS)
         if not os.path.exists(self.CACHE_DIR):
             os.makedirs(self.CACHE_DIR)
 
@@ -121,7 +111,12 @@ class ScryfallTagger:
 
             while retries > 0:
                 try:
-                    response = requests.get(url, headers=self.HEADERS, timeout=15)
+                    getter = (
+                        self.session.get
+                        if requests.get is _ORIGINAL_REQUESTS_GET
+                        else requests.get
+                    )
+                    response = getter(url, timeout=15)
                     # Support 429 backoff actively
                     if response.status_code == 429:
                         logger.warning(

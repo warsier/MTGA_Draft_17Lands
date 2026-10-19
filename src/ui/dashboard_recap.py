@@ -6,6 +6,7 @@ Calculates and displays Pool Grades, Steals, Reaches, and Synergies.
 
 import tkinter
 from tkinter import ttk
+import ttkbootstrap as tb
 import threading
 from src import constants
 from src.ui.styles import Theme
@@ -47,7 +48,7 @@ class DraftRecapScreen(ttk.Frame):
         )
         header_frame.grid(row=0, column=0, sticky="ew")
 
-        self.lbl_recovery_title = ttk.Label(
+        self.lbl_recovery_title = tb.Label(
             header_frame,
             text="Draft Completed",
             font=Theme.scaled_font(18, "bold"),
@@ -55,11 +56,11 @@ class DraftRecapScreen(ttk.Frame):
         )
         self.lbl_recovery_title.pack(side="left")
 
-        self.btn_17lands_link = ttk.Button(
+        self.btn_17lands_link = tb.Button(
             header_frame, text="View Draft on 17Lands 🌐", bootstyle="info-outline"
         )
 
-        self.btn_sealed_studio = ttk.Button(
+        self.btn_sealed_studio = tb.Button(
             header_frame,
             text="⚔️ Enter Sealed Studio",
             bootstyle="warning",
@@ -83,7 +84,7 @@ class DraftRecapScreen(ttk.Frame):
         top_recap = ttk.Frame(tab_recap)
         top_recap.pack(fill="x", pady=Theme.scaled_val((0, 10)))
 
-        self.lbl_recovery_grade = ttk.Label(
+        self.lbl_recovery_grade = tb.Label(
             top_recap,
             text="Pool Power Grade: --",
             font=Theme.scaled_font(16, "bold"),
@@ -96,7 +97,7 @@ class DraftRecapScreen(ttk.Frame):
         )
         self.lbl_recovery_stats.pack(anchor="center")
 
-        self.lbl_actual_record = ttk.Label(
+        self.lbl_actual_record = tb.Label(
             top_recap, text="", font=Theme.scaled_font(11, "bold")
         )
 
@@ -151,7 +152,7 @@ class DraftRecapScreen(ttk.Frame):
             row=0, column=0, sticky="nsew", padx=Theme.scaled_val((0, 10))
         )
 
-        ttk.Label(
+        tb.Label(
             charts_frame,
             text="MANA CURVE",
             font=Theme.scaled_font(10, "bold"),
@@ -160,7 +161,7 @@ class DraftRecapScreen(ttk.Frame):
         self.recap_curve_plot = ManaCurvePlot(charts_frame, ideal_distribution=[])
         self.recap_curve_plot.pack(fill="x", pady=Theme.scaled_val((0, 15)))
 
-        ttk.Label(
+        tb.Label(
             charts_frame,
             text="POOL BALANCE",
             font=Theme.scaled_font(10, "bold"),

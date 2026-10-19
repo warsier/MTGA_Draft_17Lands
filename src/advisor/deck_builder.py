@@ -87,94 +87,13 @@ def get_sideboard(pool, deck_stacked):
         used_count = deck_counts.get(name, 0)
         sb_count = total_count - used_count
         if sb_count > 0:
-            sb_card = copy.deepcopy(c)
+            sb_card = dict(c)
             sb_card["count"] = sb_count
             sideboard.append(sb_card)
     return sideboard
 
 
-def brute_force_mana_base(spells, non_basic_lands, colors, forced_count=17):
-    """
-    Finds the absolute optimal mana base by simulating dozens of permutations
-    around the mathematical baseline.
-    """
-    if forced_count <= 0:
-        return []
-
-    # 1. Get the heuristic baseline
-    baseline_basics = calculate_dynamic_mana_base(
-        spells, non_basic_lands, colors, forced_count
-    )
-
-    base_counts = {c: 0 for c in colors}
-    for b in baseline_basics:
-        col = b["colors"][0]
-        if col in base_counts:
-            base_counts[col] += 1
-
-    # 2. Generate Neighborhood Permutations (+/- 2 lands per color)
-    tolerance = 2
-    ranges = []
-
-    # Only test permutations for colors we actually want to cast
-    active_colors = [c for c in colors if base_counts.get(c, 0) > 0]
-    if not active_colors:
-        return baseline_basics
-
-    for c in active_colors:
-        base = base_counts[c]
-        min_val = max(0, base - tolerance)
-        max_val = base + tolerance
-        ranges.append(range(min_val, max_val + 1))
-
-    valid_permutations = []
-    for combo in itertools.product(*ranges):
-        if sum(combo) == forced_count:
-            valid_permutations.append(dict(zip(active_colors, combo)))
-
-    if not valid_permutations:
-        return baseline_basics
-
-    # 3. Simulate all valid permutations
-    best_score = -9999
-    best_perm = valid_permutations[0]
-    base_deck = spells + non_basic_lands
-
-    for perm in valid_permutations:
-        temp_lands = []
-        for c, count in perm.items():
-            if count > 0:
-                temp_lands.extend(create_basic_lands(c, count))
-
-        test_deck = base_deck + temp_lands
-
-        # We only need 2000 iterations to accurately sort permutations
-        stats = simulate_deck(test_deck, iterations=2000)
-        if not stats:
-            continue
-
-        # Fitness Function: Maximize playing on curve, TRIPLE penalty for color screw
-        score = (
-            stats["cast_t2"]
-            + stats["cast_t3"]
-            + stats["cast_t4"]
-            + (stats["curve_out"] * 2.0)
-            - (stats["mulligans"] * 1.5)
-            - (stats["screw_t3"] * 1.5)
-            - (stats["color_screw_t3"] * 3.0)
-        )
-
-        if score > best_score:
-            best_score = score
-            best_perm = perm
-
-    # 4. Return the absolute best one
-    final_lands = []
-    for c, count in best_perm.items():
-        if count > 0:
-            final_lands.extend(create_basic_lands(c, count))
-
-    return final_lands
+from src.advisor.mana_base import brute_force_mana_base
 
 
 def optimize_deck(base_deck, base_sb, archetype_key, colors):
@@ -504,6 +423,9 @@ def suggest_deck(
             deck_sig = "|".join(
                 sorted([f"{c['name']}:{c.get('count', 1)}" for c in opt_deck])
             )
+            if deck_sig in seen_signatures:
+                return
+            seen_signatures.add(deck_sig)
 
             if deck_sig in simulated_cache:
                 opt_stats, score, breakdown = simulated_cache[deck_sig]
@@ -536,13 +458,6 @@ def suggest_deck(
                             else ", ".join(mc_penalties)
                         )
                 simulated_cache[deck_sig] = (opt_stats, score, breakdown)
-
-            sig = tuple(
-                sorted([f"{c.get('name')}:{c.get('count', 1)}" for c in opt_deck])
-            )
-            if sig in seen_signatures:
-                return
-            seen_signatures.add(sig)
 
             variant_data = {
                 "label_prefix": true_variant_name,
@@ -761,14 +676,17 @@ def build_variant_consistency(pool, colors, metrics, tier_data=None):
     return stack_cards(spells + non_basic_lands + basics)
 
 
-def build_variant_greedy(pool, colors, metrics, tier_data=None):
+def build_variant_greedy(
+    pool, colors, metrics, tier_data=None, fixing_sources=None
+):
     global_mean, global_std = metrics.get_metrics("All Decks", "gihwr")
     if global_mean == 0.0:
         global_mean = 54.0
     if global_std == 0.0:
         global_std = 4.0
 
-    fixing_sources = count_fixing(pool)
+    if fixing_sources is None:
+        fixing_sources = count_fixing(pool)
     splash_candidates, best_rating = [], global_mean - (global_std * 0.5)
 
     for card in pool:
@@ -787,9 +705,7 @@ def build_variant_greedy(pool, colors, metrics, tier_data=None):
                 off_color_pips += 1
 
         if off_color_pips > 1:
-            total_fixing = fixing_sources.get(splash_col, 0) + count_fixing(pool).get(
-                splash_col, 0
-            )
+            total_fixing = fixing_sources.get(splash_col, 0)
             if not (
                 off_color_pips == 2
                 and get_functional_cmc(card) >= 5
@@ -797,7 +713,7 @@ def build_variant_greedy(pool, colors, metrics, tier_data=None):
             ):
                 continue
 
-        rating = get_card_rating(card, ["All Decks"], metrics)
+        rating = get_card_rating(card, ["All Decks"], metrics, tier_data)
         if rating > best_rating and fixing_sources.get(splash_col, 0) >= 1:
             splash_candidates.append((card, splash_col, rating))
 

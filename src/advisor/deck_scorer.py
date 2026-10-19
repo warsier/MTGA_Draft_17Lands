@@ -123,52 +123,6 @@ def calculate_holistic_score(deck, colors, pool_size, metrics, tier_data=None):
     arch_key = normalize_color_string(
         "".join(colors) if len(colors) <= 2 else "".join(colors[:2])
     )
-    valid_ratings = [
-        get_card_rating(c, [arch_key], metrics)
-        for c in spells
-        for _ in range(c.get("count", 1))
-        if get_card_rating(c, [arch_key], metrics) > 0.0
-    ]
-
-    avg_gihwr = (
-        sum(valid_ratings) / len(valid_ratings)
-        if valid_ratings
-        else global_mean - global_std
-    )
-    z_score = (avg_gihwr - global_mean) / global_std
-    power_level = 75.0 + (z_score * 12.0)
-    breakdown_notes = []
-
-    cmcs = [get_functional_cmc(c) for c in spells for _ in range(c.get("count", 1))]
-    avg_cmc = sum(cmcs) / spell_count
-
-    land_count = sum(c.get("count", 1) for c in deck if "Land" in c.get("types", []))
-    ramp_count = min(
-        3,
-        sum(
-            c.get("count", 1)
-            for c in deck
-            if (
-                "fixing_ramp" in c.get("tags", [])
-                or "treasure" in str(c.get("oracle_text", c.get("text", ""))).lower()
-                or "add {" in str(c.get("oracle_text", c.get("text", ""))).lower()
-                or "adds {" in str(c.get("oracle_text", c.get("text", ""))).lower()
-            )
-            and "Land" not in c.get("types", [])
-        ),
-    )
-
-    mana_deficit = (avg_cmc * 5.5) - (land_count + ramp_count)
-    if mana_deficit > 1.5:
-        power_level -= mana_deficit * 3.0
-        breakdown_notes.append(f"High Curve / Needs Lands (-{mana_deficit * 3.0:.1f})")
-    elif mana_deficit < -1.0 and avg_cmc < 2.8:
-        power_level += 5.0
-        breakdown_notes.append("Excellent Aggro Curve (+5.0)")
-
-    if len(colors) <= 2:
-        power_level += 2.5
-        breakdown_notes.append("Rock-Solid Mana (+2.5)")
 
     supertypes = {
         "Creature",
@@ -185,26 +139,94 @@ def calculate_holistic_score(deck, colors, pool_size, metrics, tier_data=None):
         "Tribal",
         "Kindred",
     }
-    subtypes, changeling_count = {}, 0
+    evasion_keywords = (
+        "flying",
+        "trample",
+        "menace",
+        "can't be blocked",
+        "unblockable",
+        "deals damage to any target",
+    )
+
+    valid_ratings = []
+    total_cmc = 0
+    ramp_count_raw = 0
+    changeling_count = 0
+    subtypes = {}
+    domain_payoffs = 0
+    evasion_count = 0
+    spell_records = []
+
     for c in spells:
-        text, count = (
-            str(c.get("oracle_text", c.get("text", ""))).lower(),
-            c.get("count", 1),
-        )
+        count = int(c.get("count", 1))
+        text = str(c.get("oracle_text", c.get("text", ""))).lower()
+        tags = c.get("tags", [])
+
+        r = get_card_rating(c, [arch_key], metrics, tier_data)
+        if r > 0.0:
+            valid_ratings.extend([r] * count)
+
+        cmc = get_functional_cmc(c)
+        total_cmc += cmc * count
+
+        if (
+            "fixing_ramp" in tags
+            or "treasure" in text
+            or "add {" in text
+            or "adds {" in text
+        ):
+            ramp_count_raw += count
+
+        if "evasion" in tags or any(kw in text for kw in evasion_keywords):
+            evasion_count += count
+
+        if len(colors) >= 3 and ("colors among" in text or "basic land types" in text):
+            domain_payoffs += count
+
         if "changeling" in text:
             changeling_count += count
-        for t in c.get("types", []):
-            if t not in supertypes:
-                subtypes[t] = subtypes.get(t, 0) + count
+
+        card_subtypes = c.get("subtypes", [])
+        if not card_subtypes:
+            card_subtypes = [t for t in c.get("types", []) if t not in supertypes]
+        for t in card_subtypes:
+            subtypes[t] = subtypes.get(t, 0) + count
+
+        spell_records.append((count, text))
+
+    avg_gihwr = (
+        sum(valid_ratings) / len(valid_ratings)
+        if valid_ratings
+        else global_mean - global_std
+    )
+    z_score = (avg_gihwr - global_mean) / global_std
+    power_level = 75.0 + (z_score * 12.0)
+    breakdown_notes = []
+
+    avg_cmc = total_cmc / spell_count
+    land_count = sum(c.get("count", 1) for c in deck if "Land" in c.get("types", []))
+    ramp_count = min(3, ramp_count_raw)
+
+    mana_deficit = (avg_cmc * 5.5) - (land_count + ramp_count)
+    if mana_deficit > 1.5:
+        power_level -= mana_deficit * 3.0
+        breakdown_notes.append(f"High Curve / Needs Lands (-{mana_deficit * 3.0:.1f})")
+    elif mana_deficit < -1.0 and avg_cmc < 2.8:
+        power_level += 5.0
+        breakdown_notes.append("Excellent Aggro Curve (+5.0)")
+
+    if len(colors) <= 2:
+        power_level += 2.5
+        breakdown_notes.append("Rock-Solid Mana (+2.5)")
 
     if subtypes:
         top_tribe, tribe_count = max(subtypes.items(), key=lambda x: x[1])
         total_tribe_density = tribe_count + changeling_count
+        top_tribe_lower = top_tribe.lower()
         payoff_count = sum(
-            c.get("count", 1)
-            for c in spells
-            if "chosen type" in str(c.get("oracle_text", c.get("text", ""))).lower()
-            or top_tribe.lower() in str(c.get("oracle_text", c.get("text", ""))).lower()
+            cnt
+            for cnt, text in spell_records
+            if "chosen type" in text or top_tribe_lower in text
         )
 
         if total_tribe_density >= 6 and payoff_count >= 2:
@@ -213,13 +235,6 @@ def calculate_holistic_score(deck, colors, pool_size, metrics, tier_data=None):
             breakdown_notes.append(f"{top_tribe} Synergy (+{bonus:.1f})")
 
     if len(colors) >= 3:
-        domain_payoffs = sum(
-            c.get("count", 1)
-            for c in spells
-            if "colors among" in str(c.get("oracle_text", c.get("text", ""))).lower()
-            or "basic land types"
-            in str(c.get("oracle_text", c.get("text", ""))).lower()
-        )
         fixing_count = ManaSourceAnalyzer(deck).total_fixing_cards
 
         if domain_payoffs >= 2 and fixing_count >= 4:
@@ -230,22 +245,6 @@ def calculate_holistic_score(deck, colors, pool_size, metrics, tier_data=None):
             power_level -= penalty
             breakdown_notes.append(f"Greedy Mana Strain (-{penalty:.1f})")
 
-    evasion_count = sum(
-        c.get("count", 1)
-        for c in spells
-        if "evasion" in c.get("tags", [])
-        or any(
-            kw in str(c.get("oracle_text", c.get("text", ""))).lower()
-            for kw in [
-                "flying",
-                "trample",
-                "menace",
-                "can't be blocked",
-                "unblockable",
-                "deals damage to any target",
-            ]
-        )
-    )
     if evasion_count < 3 and avg_cmc > 2.5:
         power_level -= 5.0
         breakdown_notes.append("Lacks Evasion/Reach (-5.0)")

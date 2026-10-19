@@ -7,6 +7,7 @@ Features built-in state management for onboarding UX and waiting screens.
 
 import tkinter
 from tkinter import ttk
+import ttkbootstrap as tb
 from typing import List, Dict, Any, Optional
 import threading
 import json
@@ -97,7 +98,7 @@ class DashboardFrame(ttk.Frame):
         """Helper to build a unified tips section for both waiting screens."""
         tips_frame = ttk.Frame(parent)
 
-        ttk.Label(
+        tb.Label(
             tips_frame,
             text="✨ Personalize Your Experience",
             font=Theme.scaled_font(11, "bold"),
@@ -127,14 +128,14 @@ class DashboardFrame(ttk.Frame):
             row = ttk.Frame(tips_frame)
             row.pack(fill="x", pady=Theme.scaled_val(3))
 
-            ttk.Label(
+            tb.Label(
                 row,
                 text=title,
                 font=Theme.scaled_font(9, "bold"),
                 bootstyle="primary",
             ).pack(anchor="nw")
 
-            lbl = ttk.Label(
+            lbl = tb.Label(
                 row,
                 text=desc,
                 font=Theme.scaled_font(9),
@@ -153,7 +154,7 @@ class DashboardFrame(ttk.Frame):
         center_box = ttk.Frame(self.no_data_frame)
         center_box.pack(expand=True)
 
-        ttk.Label(
+        tb.Label(
             center_box,
             text="👋 Welcome to MTGA Draft Tool",
             font=Theme.scaled_font(13, "bold"),
@@ -188,7 +189,7 @@ class DashboardFrame(ttk.Frame):
         expl_frame = ttk.Frame(center_box)
         expl_frame.pack(pady=(Theme.scaled_val(15), 0), anchor="center")
 
-        ttk.Label(
+        tb.Label(
             expl_frame,
             text="Dataset Options:",
             font=Theme.scaled_font(9, "bold"),
@@ -223,7 +224,7 @@ class DashboardFrame(ttk.Frame):
         center_box = ttk.Frame(self.waiting_frame)
         center_box.pack(expand=True)
 
-        self.lbl_waiting_title = ttk.Label(
+        self.lbl_waiting_title = tb.Label(
             center_box,
             text="Waiting for draft to begin...",
             font=Theme.scaled_font(13, "bold"),
@@ -372,7 +373,7 @@ class DashboardFrame(ttk.Frame):
             "sidebar_panel", True
         )
 
-        self.rail_btn = ttk.Button(
+        self.rail_btn = tb.Button(
             self.f_left,
             text="◀" if self.sidebar_visible else "▶",
             command=self._toggle_sidebar,

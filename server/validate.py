@@ -15,6 +15,7 @@ file keeps serving).
 import logging
 from datetime import date
 from server import config
+from src.dataset_updater import validate_dataset_payload
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,12 @@ def validate_dataset(
     label = f"{set_code} {draft_format} ({user_group})"
     warnings: list = []
     critical: list = []
+
+    if isinstance(dataset, dict) and "meta" in dataset:
+        try:
+            validate_dataset_payload(dataset)
+        except Exception as e:
+            critical.append(f"Payload schema validation failed: {e}")
 
     card_ratings = dataset.get("card_ratings", {})
     cards = _unique_cards(card_ratings)

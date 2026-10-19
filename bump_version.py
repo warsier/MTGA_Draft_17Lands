@@ -8,6 +8,7 @@ from datetime import datetime
 CONSTANTS_PATH = os.path.join("src", "constants.py")
 INSTALLER_PATH = os.path.join("builder", "Installer.iss")
 REL_NOTES_PATH = "release_notes.txt"
+README_PATH = "README.md"
 
 
 def read_file(path):
@@ -20,9 +21,14 @@ def write_file(path, content):
         f.write(content)
 
 
+def format_version_str(version_float):
+    # Formats 4.3 -> "4.30", 4.24 -> "4.24"
+    return f"{float(version_float):.2f}"
+
+
 def format_version_code(version_float):
     # Converts 3.37 -> "0337", 4.0 -> "0400"
-    return f"{int(round(version_float * 100)):04d}"
+    return f"{int(round(float(version_float) * 100)):04d}"
 
 
 def calculate_new_version(current_ver, mode, manual_ver=None):
@@ -44,16 +50,15 @@ def bump_constants(content, new_ver):
         raise ValueError("Could not find APPLICATION_VERSION in constants.py")
 
     current_ver = float(ver_match.group(1))
-
-    # Format versions for PREVIOUS_APPLICATION_VERSION (e.g., "0337")
     current_ver_code = format_version_code(current_ver)
+    new_ver_str = format_version_str(new_ver)
 
-    print(f"Bumping version: {current_ver} -> {new_ver}")
+    print(f"Bumping version: {format_version_str(current_ver)} -> {new_ver_str}")
 
     # 1. Update APPLICATION_VERSION
     new_content = re.sub(
         r"APPLICATION_VERSION\s*=\s*[\"']?\d+\.\d+[\"']?",
-        f'APPLICATION_VERSION = "{new_ver}"',
+        f'APPLICATION_VERSION = "{new_ver_str}"',
         content,
     )
 
@@ -70,9 +75,10 @@ def bump_constants(content, new_ver):
 
 def bump_installer(content, new_ver):
     new_ver_code = format_version_code(new_ver)
+    new_ver_str = format_version_str(new_ver)
 
     # 1. Update AppVersion=3.37
-    new_content = re.sub(r"AppVersion=\d+\.\d+", f"AppVersion={new_ver}", content)
+    new_content = re.sub(r"AppVersion=\d+\.\d+", f"AppVersion={new_ver_str}", content)
 
     # 2. Update OutputBaseFilename=MTGA_Draft_Tool_V0337
     new_content = re.sub(
@@ -84,6 +90,15 @@ def bump_installer(content, new_ver):
     return new_content
 
 
+def bump_readme(content, new_ver):
+    new_ver_str = format_version_str(new_ver)
+    return re.sub(
+        r"\*\*Version \d+\.\d+:\*\*",
+        f"**Version {new_ver_str}:**",
+        content,
+    )
+
+
 def prepend_release_notes(path, new_ver):
     if not os.path.exists(path):
         print("Release notes file not found, creating new one.")
@@ -91,7 +106,8 @@ def prepend_release_notes(path, new_ver):
     else:
         existing_content = read_file(path)
 
-    header = f"===================== RELEASE NOTES {new_ver} ====================="
+    new_ver_str = format_version_str(new_ver)
+    header = f"===================== RELEASE NOTES {new_ver_str} ====================="
     template = f"{header}\n* [TODO]: Add release notes here\n\n"
 
     write_file(path, template + existing_content)
@@ -136,11 +152,13 @@ def main():
 
         if args.push_only:
             new_ver = current_ver
+            new_ver_str = format_version_str(new_ver)
             print(
-                f"\nPush-Only Mode: Skipping file modifications. Using current version {new_ver}"
+                f"\nPush-Only Mode: Skipping file modifications. Using current version {new_ver_str}"
             )
         else:
             new_ver = calculate_new_version(current_ver, args.mode, args.set)
+            new_ver_str = format_version_str(new_ver)
 
             # 2. Process constants.py
             print(f"Reading {CONSTANTS_PATH}...")
@@ -155,18 +173,26 @@ def main():
             write_file(INSTALLER_PATH, new_installer)
             print(f"Updated {INSTALLER_PATH}")
 
-            # 4. Process Release Notes
+            # 4. Process README.md
+            if os.path.exists(README_PATH):
+                print(f"Reading {README_PATH}...")
+                readme_content = read_file(README_PATH)
+                new_readme = bump_readme(readme_content, new_ver)
+                write_file(README_PATH, new_readme)
+                print(f"Updated {README_PATH}")
+
+            # 5. Process Release Notes
             print(f"Updating {REL_NOTES_PATH}...")
             prepend_release_notes(REL_NOTES_PATH, new_ver)
             print(f"Prepended header to {REL_NOTES_PATH}")
 
-            # 5. Update pyproject.toml via Poetry
+            # 6. Update pyproject.toml via Poetry
             print("Updating pyproject.toml...")
-            run_cmd(["poetry", "version", str(new_ver)])
+            run_cmd(["poetry", "version", new_ver_str])
 
-            print(f"\nSUCCESS! Version bumped: {current_ver} -> {new_ver}")
+            print(f"\nSUCCESS! Version bumped: {format_version_str(current_ver)} -> {new_ver_str}")
 
-        # 6. Auto-Commit
+        # 7. Auto-Commit
         response = input(
             f"\nWould you like to automatically commit and push these changes to your branch? (y/N): "
         )
@@ -174,7 +200,7 @@ def main():
             try:
                 if args.push_only:
                     run_cmd(["git", "add", "-u"])
-                    commit_msg = f"chore: prep release version {new_ver}"
+                    commit_msg = f"chore: prep release version {new_ver_str}"
                 else:
                     run_cmd(
                         [
@@ -182,11 +208,12 @@ def main():
                             "add",
                             CONSTANTS_PATH,
                             INSTALLER_PATH,
+                            README_PATH,
                             REL_NOTES_PATH,
                             "pyproject.toml",
                         ]
                     )
-                    commit_msg = f"chore: bump version to {new_ver}"
+                    commit_msg = f"chore: bump version to {new_ver_str}"
 
                 run_cmd(["git", "commit", "-m", commit_msg])
                 run_cmd(["git", "push", "origin", "HEAD"])

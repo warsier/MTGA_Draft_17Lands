@@ -3,6 +3,7 @@ import os
 import time
 import platform
 import subprocess
+import functools
 from enum import Enum
 from typing import List
 from src.constants import (
@@ -208,7 +209,7 @@ def retrieve_local_set_list(codes=None, names=None):
     if (
         current_mtime != 0.0
         and current_mtime == _LOCAL_SET_CACHE["mtime"]
-        and _LOCAL_SET_CACHE["files"]
+        and _LOCAL_SET_CACHE["files"] is not None
     ):
         all_files = _LOCAL_SET_CACHE["files"]
     else:
@@ -363,11 +364,12 @@ def detect_string(search_line: str, search_strings: List[str]) -> int:
         if pattern in search_line:
             return json_start
 
-    # SLOW PATH: Fallback to heavily sanitized matching if WOTC changed formatting
-    norm_line = search_line.upper().replace("_", "").replace(" ", "")
+    # SLOW PATH: Fallback to heavily sanitized matching against the prefix before the JSON block
+    prefix = search_line[:json_start]
+    norm_prefix = prefix.upper().replace("_", "").replace(" ", "")
     for pattern in search_strings:
         norm_pattern = pattern.upper().replace("_", "").replace(" ", "")
-        if norm_pattern in norm_line:
+        if norm_pattern in norm_prefix:
             return json_start
 
     return -1
@@ -481,6 +483,7 @@ def read_dataset_info(filename: str, codes=None, names=None):
     return ()
 
 
+@functools.lru_cache(maxsize=256)
 def normalize_color_string(color_string: str) -> str:
     """
     Standardizes any combination of color symbols (GW, WG, RUG)
@@ -532,6 +535,7 @@ def purge_raw_cache() -> int:
     return removed
 
 
+@functools.lru_cache(maxsize=512)
 def sanitize_card_name(name: str) -> str:
     from src.constants import CARD_NAME_CORRECTIONS
 
@@ -558,7 +562,12 @@ def bind_scroll(widget, scroll_command):
     """
     Applies cross-platform mouse wheel bindings to a Tkinter widget.
     Smoothly handles OS-specific Delta calculation quirks.
+    Idempotent: prevents duplicate stacked bindings.
     """
+    if getattr(widget, "_has_scroll_bound", False):
+        return
+    widget._has_scroll_bound = True
+
     import sys
 
     if sys.platform == "darwin":

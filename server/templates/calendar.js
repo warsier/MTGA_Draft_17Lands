@@ -12,6 +12,12 @@ const formatColors = {
     'Default': 'bg-slate-600 border border-slate-400 text-white'
 };
 
+function escapeHTML(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const statusEl = document.getElementById('calendar-status');
 
@@ -28,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .catch(e => {
             console.error(e);
-            if (statusEl) statusEl.innerHTML = `<span class="text-red-400 font-bold">Error loading calendar:</span><br>${e.message}`;
+            if (statusEl) statusEl.innerHTML = `<span class="text-red-400 font-bold">Error loading calendar:</span><br>${escapeHTML(e.message)}`;
         });
 
     document.getElementById('prev-month').addEventListener('click', () => {
@@ -232,7 +238,7 @@ function renderCalendar() {
         console.error("Calendar Render Error:", err);
         const statusEl = document.getElementById('calendar-status');
         if (statusEl) {
-            statusEl.innerHTML = `<span class="text-red-400 font-bold">Render Error:</span><br>${err.message}`;
+            statusEl.innerHTML = `<span class="text-red-400 font-bold">Render Error:</span><br>${escapeHTML(err.message)}`;
         }
     }
 }

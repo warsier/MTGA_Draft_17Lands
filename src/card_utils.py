@@ -7,9 +7,29 @@ card_logic re-exports the advisor modules, and the advisor modules need these
 helpers, so keeping them here breaks the import cycle.
 """
 
-import copy
 import re
 from src import constants
+
+COST_REDUCTION_RE = re.compile(r"costs?\s+(.*?)\s+less")
+BLOCKS_RE = re.compile(r"\{(.*?)\}")
+DIGITS_RE = re.compile(r"\d+")
+
+ALT_KEYWORDS = (
+    "evoke {",
+    "prototype {",
+    "spectacle {",
+    "surge {",
+    "cleave {",
+    "blitz {",
+    "prowl {",
+    "madness {",
+    "miracle {",
+    "convoke",
+    "affinity for",
+    "improvise",
+    "spree",
+    "sneak {",
+)
 
 
 def get_functional_cmc(card: dict) -> int:
@@ -18,35 +38,45 @@ def get_functional_cmc(card: dict) -> int:
     mechanics, alternate casting costs (Disguise/Morph/Evoke), and channel abilities.
     Prevents expensive but highly playable cards from being falsely penalized as 'clunky'.
     """
+    if "_functional_cmc" in card:
+        return card["_functional_cmc"]
+
     try:
         raw_cmc = int(card.get("cmc", 0))
         text = str(card.get("oracle_text", card.get("text", ""))).lower()
 
         if not text:
+            card["_functional_cmc"] = raw_cmc
             return raw_cmc
 
         if "landcycling" in text or "bloodrush" in text:
-            return min(raw_cmc, 2)
+            res = min(raw_cmc, 2)
+            card["_functional_cmc"] = res
+            return res
 
         # Mechanics that let you play the card face down for 3
         if "disguise {" in text or "morph {" in text or "face down as a 2/2" in text:
-            return min(raw_cmc, 3)
+            res = min(raw_cmc, 3)
+            card["_functional_cmc"] = res
+            return res
 
         # Channel abilities (act as spells)
         if "channel \u2014" in text or "channel —" in text or "channel -" in text:
-            return min(raw_cmc, 2)
+            res = min(raw_cmc, 2)
+            card["_functional_cmc"] = res
+            return res
 
         # Generic cost reduction: e.g., "costs {3} less", "costs {1} and {U} less", "costs 2 less"
-        reduction_match = re.search(r"costs?\s+(.*?)\s+less", text)
+        reduction_match = COST_REDUCTION_RE.search(text)
         if reduction_match:
             try:
                 cost_str = reduction_match.group(1)
-                blocks = re.findall(r"\{(.*?)\}", cost_str)
+                blocks = BLOCKS_RE.findall(cost_str)
                 total_reduction = 0
 
                 if not blocks:
                     # e.g. "costs 2 less"
-                    digits = re.findall(r"\d+", cost_str)
+                    digits = DIGITS_RE.findall(cost_str)
                     if digits:
                         total_reduction = sum(int(d) for d in digits)
                 else:
@@ -58,31 +88,20 @@ def get_functional_cmc(card: dict) -> int:
                             total_reduction += 1
 
                 if total_reduction > 0:
-                    return max(1, raw_cmc - total_reduction)
+                    res = max(1, raw_cmc - total_reduction)
+                    card["_functional_cmc"] = res
+                    return res
             except (ValueError, TypeError):
                 pass
 
         # Alternate cost keywords that typically mean it's castable for much cheaper
-        alt_keywords = [
-            "evoke {",
-            "prototype {",
-            "spectacle {",
-            "surge {",
-            "cleave {",
-            "blitz {",
-            "prowl {",
-            "madness {",
-            "miracle {",
-            "convoke",
-            "affinity for",
-            "improvise",
-            "spree",
-            "sneak {",
-        ]
-        if raw_cmc > 3 and any(kw in text for kw in alt_keywords):
+        if raw_cmc > 3 and any(kw in text for kw in ALT_KEYWORDS):
             # Generically treat these as 2 mana cheaper for curve/simulation purposes
-            return max(2, raw_cmc - 2)
+            res = max(2, raw_cmc - 2)
+            card["_functional_cmc"] = res
+            return res
 
+        card["_functional_cmc"] = raw_cmc
         return raw_cmc
     except Exception:
         return 0
@@ -93,9 +112,10 @@ def stack_cards(cards):
     stacked = {}
     for c in cards:
         name = c.get(constants.DATA_FIELD_NAME, "Unknown")
+        c_count = c.get("count", 1)
         if name not in stacked:
-            stacked[name] = copy.deepcopy(c)
-            stacked[name]["count"] = 1
+            stacked[name] = dict(c)
+            stacked[name]["count"] = c_count
         else:
-            stacked[name]["count"] += 1
+            stacked[name]["count"] += c_count
     return list(stacked.values())

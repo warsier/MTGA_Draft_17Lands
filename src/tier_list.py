@@ -116,7 +116,11 @@ class TierList(BaseModel):
             mtime = 0.0
             file_names = []
 
-        if mtime != 0.0 and mtime == _TIER_CACHE["mtime"] and _TIER_CACHE["files"]:
+        if (
+            mtime != 0.0
+            and mtime == _TIER_CACHE["mtime"]
+            and _TIER_CACHE["files"] is not None
+        ):
             return _TIER_CACHE["files"]
 
         file_list = []

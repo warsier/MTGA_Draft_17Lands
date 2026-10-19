@@ -6,6 +6,7 @@ Extracts all Tkinter widget boilerplate out of the main application context.
 
 import tkinter
 from tkinter import ttk
+import ttkbootstrap as tb
 import logging
 
 from src.ui.styles import Theme
@@ -92,7 +93,7 @@ class AppLayoutManager:
 
         self.dashboard.pack(side="top", fill="both", expand=True)
 
-        self.btn_toggle_tabs = ttk.Button(
+        self.btn_toggle_tabs = tb.Button(
             self.tab_controls,
             text="▼ Hide Tabs",
             bootstyle="secondary-outline",
@@ -101,7 +102,7 @@ class AppLayoutManager:
         )
         self.btn_toggle_tabs.pack(side="right", padx=Theme.scaled_val(5))
 
-        self.lbl_session_info = ttk.Label(
+        self.lbl_session_info = tb.Label(
             self.tab_controls,
             font=Theme.scaled_font(9),
             bootstyle="secondary",

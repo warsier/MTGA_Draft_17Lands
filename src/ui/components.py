@@ -7,12 +7,12 @@ import tkinter
 from tkinter import ttk, messagebox
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
-import requests, io, math, re, threading, hashlib, os
+import requests, io, math, re, threading, hashlib, os, collections
 from typing import List, Dict, Any, Tuple, Optional
 from PIL import Image, ImageTk
 from concurrent.futures import ThreadPoolExecutor
 from src import constants
-from src.card_logic import field_process_sort
+from src.card_logic import field_process_sort, format_win_rate, row_color_tag, format_types_for_ui
 from src.ui.styles import Theme
 
 
@@ -36,7 +36,7 @@ def identify_safe_coordinates(root, window_width, window_height, offset_x, offse
         return offset_x, offset_y
 
 
-class AutoScrollbar(ttk.Scrollbar):
+class AutoScrollbar(tb.Scrollbar):
     """A scrollbar that hides itself if it's not needed. Only works within the grid geometry manager."""
 
     def __init__(self, *args, **kwargs):
@@ -90,7 +90,7 @@ class CollapsibleFrame(ttk.Frame):
             self.expanded = expanded
         self.header_frame = ttk.Frame(self)
         self.header_frame.pack(fill="x", expand=False)
-        self.toggle_label = ttk.Label(
+        self.toggle_label = tb.Label(
             self.header_frame,
             text="▼" if self.expanded else "▶",
             width=2,
@@ -210,14 +210,125 @@ class AutocompleteEntry(tb.Entry):
         self.icursor(len(typed_prefix))
 
 
-class CardToolTip(tkinter.Toplevel):
+class CardImageLoader:
+    """
+    Centralized asynchronous card image loader with:
+    - In-flight request coalescing (avoids duplicate network/disk requests for same card)
+    - In-memory LRU cache (capped to avoid memory bloat)
+    - Persistent disk cache in Temp/Images
+    - Shared ThreadPoolExecutor
+    """
     IMAGE_CACHE_DIR = os.path.join(constants.TEMP_FOLDER, "Images")
-    _active_tooltip = None
+    _MAX_IN_MEMORY_IMAGES = 100
+    _in_memory_images: "collections.OrderedDict[Tuple[str, Optional[Tuple[int, int]]], Image.Image]" = collections.OrderedDict()
+    _in_flight: Dict[Any, List[Any]] = {}
+    _lock = threading.Lock()
     _image_executor = ThreadPoolExecutor(max_workers=4)
 
-    # Added LRU Dictionary to manage in-memory image objects so we don't bleed RAM over long sessions
-    _in_memory_images = {}
-    _MAX_IN_MEMORY_IMAGES = 60
+    @classmethod
+    def normalize_url(cls, u: str) -> str:
+        if not u:
+            return ""
+        if u.startswith("/static"):
+            return f"https://www.17lands.com{u}"
+        if "scryfall" in u and "format=image" not in u:
+            return u.replace("/small/", "/large/").replace("/normal/", "/large/")
+        return u
+
+    @classmethod
+    def get_cache_key(cls, url: str, target_size: Optional[Tuple[int, int]] = None) -> Tuple[str, Optional[Tuple[int, int]]]:
+        norm = cls.normalize_url(url)
+        md5_hash = hashlib.md5(norm.encode("utf-8")).hexdigest()
+        return (md5_hash, target_size)
+
+    @classmethod
+    def load_image_async(
+        cls,
+        url: str,
+        target_size: Optional[Tuple[int, int]],
+        callback,
+    ):
+        """
+        Loads an image asynchronously.
+        Calls callback(PIL.Image.Image or None) when finished.
+        """
+        if not url:
+            callback(None)
+            return
+
+        norm_url = cls.normalize_url(url)
+        key = cls.get_cache_key(norm_url, target_size)
+
+        with cls._lock:
+            if key in cls._in_memory_images:
+                im = cls._in_memory_images[key]
+                cls._in_memory_images.move_to_end(key)
+                callback(im)
+                return
+
+            if key in cls._in_flight:
+                cls._in_flight[key].append(callback)
+                return
+
+            cls._in_flight[key] = [callback]
+
+        cls._image_executor.submit(cls._fetch_worker, norm_url, key, target_size)
+
+    @classmethod
+    def _fetch_worker(cls, norm_url: str, key, target_size: Optional[Tuple[int, int]]):
+        im = None
+        try:
+            os.makedirs(cls.IMAGE_CACHE_DIR, exist_ok=True)
+            disk_path = os.path.join(cls.IMAGE_CACHE_DIR, key[0] + ".jpg")
+
+            if os.path.exists(disk_path):
+                with open(disk_path, "rb") as f:
+                    r = f.read()
+            else:
+                req = requests.get(
+                    norm_url,
+                    headers={"User-Agent": "MTGADraftTool/5.0"},
+                    timeout=8,
+                )
+                req.raise_for_status()
+                r = req.content
+                with open(disk_path, "wb") as f:
+                    f.write(r)
+
+            im = Image.open(io.BytesIO(r))
+            if target_size:
+                im.thumbnail(target_size, Image.Resampling.LANCZOS)
+
+            with cls._lock:
+                if len(cls._in_memory_images) >= cls._MAX_IN_MEMORY_IMAGES:
+                    cls._in_memory_images.popitem(last=False)
+                cls._in_memory_images[key] = im
+
+        except Exception:
+            im = None
+
+        with cls._lock:
+            callbacks = cls._in_flight.pop(key, [])
+
+        for cb in callbacks:
+            try:
+                cb(im)
+            except Exception:
+                pass
+
+    @classmethod
+    def clear_cache(cls):
+        with cls._lock:
+            cls._in_memory_images.clear()
+            cls._in_flight.clear()
+
+
+class CardToolTip(tkinter.Toplevel):
+    IMAGE_CACHE_DIR = CardImageLoader.IMAGE_CACHE_DIR
+    _active_tooltip = None
+    _image_executor = CardImageLoader._image_executor
+    _in_memory_images = CardImageLoader._in_memory_images
+    _MAX_IN_MEMORY_IMAGES = CardImageLoader._MAX_IN_MEMORY_IMAGES
 
     @classmethod
     def create(cls, parent, card, images_enabled, scale):
@@ -517,70 +628,27 @@ class CardToolTip(tkinter.Toplevel):
             pass
 
     def _load_image_async(self, u, s):
-        if "scryfall" in u:
-            u = u.replace("/small/", "/large/").replace("/normal/", "/large/")
+        target_size = (int(240 * s), int(335 * s))
 
-        cache_key = hashlib.md5(u.encode("utf-8")).hexdigest()
+        def on_image_loaded(im):
+            if not hasattr(self, "winfo_exists") or not self.winfo_exists():
+                return
+            if im is None:
+                try:
+                    self.after(0, lambda: self._apply_error() if self.winfo_exists() else None)
+                except RuntimeError:
+                    pass
+            else:
+                try:
+                    self.after(0, lambda: self._apply_image(im) if self.winfo_exists() else None)
+                except RuntimeError:
+                    pass
 
-        if cache_key in self._in_memory_images:
-            # Memory Hit! Instant render.
-            self.after(0, lambda: self._apply_image(self._in_memory_images[cache_key]))
-            return
-
-        self._image_executor.submit(self._fetch_and_apply_image, u, s, cache_key)
+        CardImageLoader.load_image_async(u, target_size, on_image_loaded)
 
     def _fetch_and_apply_image(self, u, s, cache_key):
-        """Moved the core logic into a clean worker method"""
-        try:
-            if not u:
-                if hasattr(self, "winfo_exists"):
-                    try:
-                        self.after(0, lambda: self._apply_error() if self.winfo_exists() else None)
-                    except RuntimeError:
-                        pass
-                return
-            sn = cache_key + ".jpg"
-            cp = os.path.join(self.IMAGE_CACHE_DIR, sn)
-            if os.path.exists(cp):
-                with open(cp, "rb") as fi:
-                    r = fi.read()
-            else:
-                req = requests.get(u, headers={"User-Agent": "MTGADraftTool"}, timeout=5)
-                req.raise_for_status()
-                r = req.content
-                with open(cp, "wb") as fi:
-                    fi.write(r)
-
-            im = Image.open(io.BytesIO(r))
-            im.thumbnail((int(240 * s), int(335 * s)), Image.Resampling.LANCZOS)
-
-            # Save to LRU dictionary
-            if len(CardToolTip._in_memory_images) > CardToolTip._MAX_IN_MEMORY_IMAGES:
-                # Remove oldest entry to prevent RAM bloat
-                CardToolTip._in_memory_images.pop(
-                    next(iter(CardToolTip._in_memory_images))
-                )
-
-            CardToolTip._in_memory_images[cache_key] = im
-
-            # Safely route back to Tkinter Main Thread
-            if hasattr(self, "winfo_exists"):
-                try:
-                    self.after(
-                        0,
-                        lambda: self._apply_image(im) if self.winfo_exists() else None,
-                    )
-                except RuntimeError:
-                    pass
-        except Exception as e:
-            if hasattr(self, "winfo_exists"):
-                try:
-                    self.after(
-                        0,
-                        lambda: self._apply_error() if self.winfo_exists() else None,
-                    )
-                except RuntimeError:
-                    pass
+        """Worker method preserved for backwards compatibility."""
+        self._load_image_async(u, s)
 
     def _apply_image(self, im):
         if hasattr(self, "winfo_exists") and self.winfo_exists():
@@ -632,6 +700,17 @@ class ModernTreeview(ttk.Treeview):
 
         self._pulse_step = 0
         self._last_picked_items = set()
+        self._anim_timer = None
+
+    def trigger_pick_animation(self):
+        """Triggers or restarts the 1-second pulse animation on picked rows."""
+        if self._anim_timer is not None:
+            try:
+                self.after_cancel(self._anim_timer)
+            except Exception:
+                pass
+            self._anim_timer = None
+        self._pulse_step = 0
         self._animate_picked_row()
 
     def _animate_picked_row(self):
@@ -644,63 +723,64 @@ class ModernTreeview(ttk.Treeview):
             if "picked" in self.item(item, "tags")
         )
 
+        if not current_picked:
+            self._pulse_step = 0
+            self.tag_configure("picked", background="#15803d", foreground="#ffffff")
+            self._anim_timer = None
+            return
+
         # Reset animation if new items are picked (e.g. data refreshed)
         if current_picked != self._last_picked_items:
             self._pulse_step = 0
             self._last_picked_items = current_picked
 
-        if current_picked:
-            # Sequence for ~1 second (15 frames @ 65ms)
-            bg_colors = [
-                "#14532d",
-                "#166534",
-                "#15803d",
-                "#16a34a",
-                "#22c55e",
-                "#4ade80",
-                "#22c55e",
-                "#16a34a",
-                "#15803d",
-                "#166534",
-                "#15803d",
-                "#15803d",
-                "#15803d",
-                "#15803d",
-                "#15803d",
-            ]
-            fg_colors = [
-                "#f8fafc",
-                "#f8fafc",
-                "#f8fafc",
-                "#f8fafc",
-                "#0f172a",
-                "#0f172a",
-                "#0f172a",
-                "#f8fafc",
-                "#f8fafc",
-                "#f8fafc",
-                "#ffffff",
-                "#ffffff",
-                "#ffffff",
-                "#ffffff",
-                "#ffffff",
-            ]
+        # Sequence for ~1 second (15 frames @ 65ms)
+        bg_colors = [
+            "#14532d",
+            "#166534",
+            "#15803d",
+            "#16a34a",
+            "#22c55e",
+            "#4ade80",
+            "#22c55e",
+            "#16a34a",
+            "#15803d",
+            "#166534",
+            "#15803d",
+            "#15803d",
+            "#15803d",
+            "#15803d",
+            "#15803d",
+        ]
+        fg_colors = [
+            "#f8fafc",
+            "#f8fafc",
+            "#f8fafc",
+            "#f8fafc",
+            "#0f172a",
+            "#0f172a",
+            "#0f172a",
+            "#f8fafc",
+            "#f8fafc",
+            "#f8fafc",
+            "#ffffff",
+            "#ffffff",
+            "#ffffff",
+            "#ffffff",
+            "#ffffff",
+        ]
 
-            if self._pulse_step < len(bg_colors):
-                idx = self._pulse_step
-                self.tag_configure(
-                    "picked", background=bg_colors[idx], foreground=fg_colors[idx]
-                )
-                self._pulse_step += 1
-            else:
-                # Settle on final solid color after animation ends
-                self.tag_configure("picked", background="#15803d", foreground="#ffffff")
+        if self._pulse_step < len(bg_colors):
+            idx = self._pulse_step
+            self.tag_configure(
+                "picked", background=bg_colors[idx], foreground=fg_colors[idx]
+            )
+            self._pulse_step += 1
+            self._anim_timer = self.after(65, self._animate_picked_row)
         else:
-            self._pulse_step = 0
+            # Settle on final solid color after animation ends, do not reschedule timer
             self.tag_configure("picked", background="#15803d", foreground="#ffffff")
-
-        # Loop roughly at 15 FPS
-        self.after(65, self._animate_picked_row)
+            self._anim_timer = None
 
     def _get_sort_group(self, view_id):
         """Links shared tables (e.g. Main Pack and Mini Pack) so they inherit sorting from each other."""
@@ -888,7 +968,7 @@ class ModernTreeview(ttk.Treeview):
                 foreground=f,
             )
 
-    def _handle_sort(self, column, force_reverse=None):
+    def _handle_sort(self, column, force_reverse=None, persist=True):
         from src.card_logic import field_process_sort
 
         if force_reverse is not None:
@@ -902,7 +982,7 @@ class ModernTreeview(ttk.Treeview):
         self.active_sort_column = column
 
         # Persist the sort state centrally so it survives windows swaps
-        if self.config and self.view_id:
+        if persist and self.config and self.view_id:
             if not hasattr(self.config.settings, "table_sort_states"):
                 self.config.settings.table_sort_states = {}
 
@@ -1004,7 +1084,12 @@ class ModernTreeview(ttk.Treeview):
                 force_reverse=self.column_sort_state.get(
                     self.active_sort_column, False
                 ),
+                persist=False,
             )
+            for item in self.get_children(""):
+                if "picked" in self.item(item, "tags"):
+                    self.trigger_pick_animation()
+                    break
             return True
         return False
 
@@ -1224,6 +1309,85 @@ class DynamicTreeviewManager(ttk.Frame):
         self.config.settings.column_configs[self.view_id] = self.active_fields
         write_configuration(self.config)
         self.rebuild(True)
+
+    format_row_values = staticmethod(lambda *args, **kwargs: format_card_row_values(*args, **kwargs))
+    get_row_tag = staticmethod(lambda *args, **kwargs: get_card_row_tag(*args, **kwargs))
+
+
+def format_card_row_values(
+    card: dict,
+    fields: List[str],
+    active_filter: str = "All Decks",
+    metrics: Optional[dict] = None,
+    result_format: str = constants.RESULT_FORMAT_WIN_RATE,
+    tier_data: Optional[dict] = None,
+) -> List[str]:
+    """Formats values of a card for dynamic Treeview display across all tabs."""
+    if active_filter == constants.FILTER_OPTION_AUTO:
+        active_filter = "All Decks"
+
+    row_values = []
+    for field in fields:
+        if field == "name":
+            row_values.append(card.get("name", "Unknown"))
+        elif field == "count":
+            row_values.append(str(card.get("count", 1)))
+        elif field == "cmc":
+            row_values.append(str(card.get("cmc", 0)))
+        elif field == "types":
+            row_values.append(format_types_for_ui(card.get("types", [])))
+        elif field == "mana_cost":
+            row_values.append(card.get("mana_cost", ""))
+        elif field == "colors":
+            cols = card.get("colors", [])
+            row_values.append("".join(cols) if isinstance(cols, list) else str(cols))
+        elif field == "tags":
+            raw_tags = card.get("tags", [])
+            if raw_tags:
+                icons = [
+                    constants.TAG_VISUALS.get(t, t).split(" ")[0]
+                    for t in raw_tags
+                ]
+                row_values.append(" ".join(icons))
+            else:
+                row_values.append("-")
+        elif "TIER" in field:
+            if tier_data and field in tier_data:
+                tier_obj = tier_data[field]
+                raw_name = card.get("name", "")
+                if raw_name in tier_obj.ratings:
+                    row_values.append(tier_obj.ratings[raw_name].rating)
+                else:
+                    row_values.append("NA")
+            else:
+                row_values.append("NA")
+        else:
+            stats = card.get("deck_colors", {})
+            arch_stats = stats.get(active_filter) or stats.get("All Decks", {})
+            val = arch_stats.get(field, 0.0)
+            if metrics:
+                row_values.append(
+                    format_win_rate(
+                        val,
+                        active_filter,
+                        field,
+                        metrics,
+                        result_format,
+                    )
+                )
+            elif val > 0:
+                row_values.append(f"{val:.1f}%")
+            else:
+                row_values.append("-")
+
+    return row_values
+
+
+def get_card_row_tag(card: dict, idx: int, colors_enabled: bool) -> str:
+    """Returns the visual styling tag for a card row in Treeview."""
+    if colors_enabled:
+        return row_color_tag(card.get(constants.DATA_FIELD_MANA_COST, ""))
+    return "bw_odd" if idx % 2 == 0 else "bw_even"
 
 
 class SignalMeter(tb.Frame):
@@ -1656,7 +1820,7 @@ class ColorFilterSelector(ttk.Frame):
         self.filter_map: Dict[str, str] = {}  # display label -> filter key
 
         if caption:
-            ttk.Label(
+            tb.Label(
                 self,
                 text=caption,
                 font=Theme.scaled_font(8, "bold"),
@@ -1666,7 +1830,7 @@ class ColorFilterSelector(ttk.Frame):
         self.option_menu = ttk.OptionMenu(
             self, self.variable, "", style="TMenubutton"
         )
-        self.status_label = ttk.Label(
+        self.status_label = tb.Label(
             self, text="", font=Theme.scaled_font(9, "italic"), bootstyle="info"
         )
         if status_first:

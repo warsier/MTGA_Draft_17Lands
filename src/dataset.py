@@ -175,14 +175,21 @@ class Dataset:
         worker.start()
         return worker
 
-    def _resolve_unknown_id(self, grp_id: str) -> str:
-        """Queries the local MTG Arena database to instantly translate unknown IDs."""
-        # If the cache has the ID but it's just a raw number, ignore the cache and try again.
-        # The user may have just linked their database folder!
-        if grp_id in self.unknown_id_cache:
-            cached_name = self.unknown_id_cache[grp_id]
-            if not str(cached_name).isdigit():
-                return cached_name
+    def _resolve_unknown_ids_batch(self, grp_ids: List[str]) -> Dict[str, str]:
+        """Queries the local MTG Arena database to batch translate unknown IDs."""
+        result = {}
+        missing_ids = []
+        for grp_id in grp_ids:
+            str_id = str(grp_id)
+            if str_id in self.unknown_id_cache:
+                cached_name = self.unknown_id_cache[str_id]
+                if not str(cached_name).isdigit():
+                    result[str_id] = cached_name
+                    continue
+            missing_ids.append(str_id)
+
+        if not missing_ids:
+            return result
 
         import sqlite3
         import os
@@ -208,57 +215,80 @@ class Dataset:
                         reverse=True,
                     )
 
-                    try:
-                        numeric_id = int(grp_id)
-                    except ValueError:
-                        numeric_id = grp_id
-
-                    # Iterate through all DB files in case MTGA split the data (e.g. basics in an older file)
-                    for db_filename in db_files:
-                        db_file = os.path.join(db_folder, db_filename)
+                    remaining_numeric_map = {}
+                    for aid in missing_ids:
                         try:
-                            # Standard connect with timeout avoids Windows URI pathing bugs
+                            remaining_numeric_map[int(aid)] = aid
+                        except ValueError:
+                            remaining_numeric_map[aid] = aid
+
+                    for db_filename in db_files:
+                        if not remaining_numeric_map:
+                            break
+                        db_file = os.path.join(db_folder, db_filename)
+                        conn = None
+                        try:
                             conn = sqlite3.connect(db_file, timeout=5.0)
                             cursor = conn.cursor()
 
-                            # Find all localization tables to support non-English clients and avoid empty deprecated tables
                             cursor.execute(
                                 "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Localizations%'"
                             )
                             loc_tables = cursor.fetchall()
-
-                            # Fallback to standard if nothing found
                             if not loc_tables:
                                 loc_tables = [("Localizations_enUS",)]
 
                             for (table_name,) in loc_tables:
+                                if not remaining_numeric_map:
+                                    break
                                 try:
-                                    query = f"SELECT loc.Loc FROM Cards c JOIN {table_name} loc ON c.titleid = loc.LocId WHERE c.grpid = ?"
-                                    cursor.execute(query, (numeric_id,))
-                                    row = cursor.fetchone()
-                                    if row and row[0]:
-                                        name = row[0]
-                                        conn.close()
-                                        self.unknown_id_cache[grp_id] = name
-                                        return name
+                                    target_keys = list(remaining_numeric_map.keys())
+                                    if len(target_keys) == 1:
+                                        query = f"SELECT loc.Loc FROM Cards c JOIN {table_name} loc ON c.titleid = loc.LocId WHERE c.grpid = ?"
+                                        cursor.execute(query, (target_keys[0],))
+                                        row = cursor.fetchone()
+                                        if row and row[0]:
+                                            orig_id = remaining_numeric_map.pop(target_keys[0], str(target_keys[0]))
+                                            result[orig_id] = row[0]
+                                            self.unknown_id_cache[orig_id] = row[0]
+                                    else:
+                                        placeholders = ",".join("?" for _ in target_keys)
+                                        query = f"SELECT c.grpid, loc.Loc FROM Cards c JOIN {table_name} loc ON c.titleid = loc.LocId WHERE c.grpid IN ({placeholders})"
+                                        cursor.execute(query, target_keys)
+                                        for grpid, loc in cursor.fetchall():
+                                            if loc:
+                                                orig_id = remaining_numeric_map.pop(grpid, str(grpid))
+                                                result[orig_id] = loc
+                                                self.unknown_id_cache[orig_id] = loc
                                 except Exception:
                                     continue
-
-                            conn.close()
                         except Exception as e:
                             from src.logger import create_logger
 
                             create_logger().error(
                                 f"Failed to read MTGA DB file {db_filename}: {e}"
                             )
-                            continue
+                        finally:
+                            if conn is not None:
+                                try:
+                                    conn.close()
+                                except Exception:
+                                    pass
         except Exception as e:
             from src.logger import create_logger
 
-            create_logger().error(f"SQLite ID Resolution failed: {e}")
+            create_logger().error(f"SQLite Batch ID Resolution failed: {e}")
 
-        self.unknown_id_cache[grp_id] = grp_id
-        return grp_id
+        for aid in missing_ids:
+            if aid not in result:
+                result[aid] = aid
+                self.unknown_id_cache[aid] = aid
+
+        return result
+
+    def _resolve_unknown_id(self, grp_id: str) -> str:
+        """Queries the local MTG Arena database to instantly translate unknown IDs."""
+        return self._resolve_unknown_ids_batch([str(grp_id)]).get(str(grp_id), str(grp_id))
 
     def open_file(self, file_location: str) -> Result:
         if not file_location:
@@ -349,13 +379,19 @@ class Dataset:
 
         result_map = {}
         unknown_ids_to_fetch = []
+        unresolved_local_ids = []
 
         for arena_id in id_list:
             string_id = str(arena_id)
             if string_id in ratings and not str(ratings[string_id].get("name", "")).isdigit():
                 result_map[string_id] = ratings[string_id]
             elif self._retrieve_unknown:
-                display_name = self._resolve_unknown_id(string_id)
+                unresolved_local_ids.append(string_id)
+
+        if unresolved_local_ids:
+            batch_resolved = self._resolve_unknown_ids_batch(unresolved_local_ids)
+            for string_id in unresolved_local_ids:
+                display_name = batch_resolved.get(string_id, string_id)
 
                 if (
                     display_name

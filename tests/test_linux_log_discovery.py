@@ -10,6 +10,8 @@ to manual configuration.
 
 import os
 import sys
+import tempfile
+import shutil
 import pytest
 
 from src import constants
@@ -49,13 +51,15 @@ def _make_prefix_log(home, prefix, user="dorian"):
 
 
 @pytest.fixture
-def fake_home(tmp_path, monkeypatch):
-    home = str(tmp_path / "home")
+def fake_home(monkeypatch):
+    temp_dir = tempfile.mkdtemp(prefix="m_")
+    home = os.path.join(temp_dir, "h")
     os.makedirs(home, exist_ok=True)
     monkeypatch.setenv("HOME", home)
     monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", home, 1))
     monkeypatch.setattr(sys, "platform", constants.PLATFORM_ID_LINUX)
-    return home
+    yield home
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 @pytest.mark.parametrize(
@@ -84,29 +88,33 @@ def test_finds_log_in_non_steam_prefix(fake_home, prefix):
     assert file_extractor.search_arena_log_locations() == expected
 
 
-def test_finds_log_in_secondary_steam_library(fake_home, tmp_path):
+def test_finds_log_in_secondary_steam_library(fake_home):
     """A game installed on a second drive, declared in libraryfolders.vdf."""
-    library = str(tmp_path / "second_drive" / "SteamLibrary")
-    path = os.path.join(
-        library,
-        "steamapps",
-        "compatdata",
-        constants.MTGA_STEAM_APPID,
-        "pfx",
-        "drive_c",
-        "users",
-        "steamuser",
-        APPDATA_TAIL,
-    )
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    open(path, "w", encoding="utf-8").close()
+    temp_lib = tempfile.mkdtemp(prefix="m_lib_")
+    try:
+        library = os.path.join(temp_lib, "SLib")
+        path = os.path.join(
+            library,
+            "steamapps",
+            "compatdata",
+            constants.MTGA_STEAM_APPID,
+            "pfx",
+            "drive_c",
+            "users",
+            "steamuser",
+            APPDATA_TAIL,
+        )
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w", encoding="utf-8").close()
 
-    vdf_dir = os.path.join(fake_home, ".local", "share", "Steam", "config")
-    os.makedirs(vdf_dir, exist_ok=True)
-    with open(os.path.join(vdf_dir, "libraryfolders.vdf"), "w", encoding="utf-8") as f:
-        f.write('"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' % library)
+        vdf_dir = os.path.join(fake_home, ".local", "share", "Steam", "config")
+        os.makedirs(vdf_dir, exist_ok=True)
+        with open(os.path.join(vdf_dir, "libraryfolders.vdf"), "w", encoding="utf-8") as f:
+            f.write('"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' % library)
 
-    assert file_extractor.search_arena_log_locations() == path
+        assert file_extractor.search_arena_log_locations() == path
+    finally:
+        shutil.rmtree(temp_lib, ignore_errors=True)
 
 
 def test_prefers_most_recently_written_log(fake_home):

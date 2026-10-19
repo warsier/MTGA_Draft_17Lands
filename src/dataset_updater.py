@@ -14,6 +14,7 @@ import requests
 from src import constants
 from src.configuration import CONFIG_LOCK
 from src.dataset_manifest import validate_manifest
+from src.utils import invalidate_local_set_cache
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +212,7 @@ class DatasetUpdater:
             if failures:
                 progress_callback(f"Skipped {failures} dataset update(s). Kept cached data.")
             elif updates_made:
+                invalidate_local_set_cache()
                 progress_callback("Datasets updated successfully.")
         except Exception as error:
             logger.error(f"Failed to sync datasets; kept cached data: {error}")

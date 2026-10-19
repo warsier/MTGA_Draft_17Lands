@@ -33,7 +33,7 @@ def test_update_notification_opens_only_official_page(root, mock_app_context, ac
         menu.notify_app_update("99.99")
         prompt.assert_called_once()
         if accepted:
-            browser.assert_called_once_with("https://github.com/unrealities/MTGA_Draft_17Lands/releases/latest")
+            browser.assert_called_once_with("https://github.com/warsier/MTGA_Draft_17Lands/releases/latest")
         else:
             browser.assert_not_called()
 

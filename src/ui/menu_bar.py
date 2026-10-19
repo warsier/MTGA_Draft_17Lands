@@ -31,7 +31,7 @@ class AppMenuBar:
             f"MTGA Draft Tool {version} is available. Open the release page?",
             parent=self.root,
         ):
-            webbrowser.open("https://github.com/unrealities/MTGA_Draft_17Lands/releases/latest")
+            webbrowser.open("https://github.com/warsier/MTGA_Draft_17Lands/releases/latest")
 
     def _setup_menu(self):
         m = tkinter.Menu(self.root)

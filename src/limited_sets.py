@@ -114,8 +114,18 @@ class LimitedSets:
         self.limited_sets = SetDictionary()
         self.sets_scryfall = SetDictionary()
         self.sets_17lands = SetDictionary()
-        self.context = ssl.create_default_context(cafile=certifi.where())
+        self._context = None
         self.latest_set = ""
+
+    @property
+    def context(self):
+        if self._context is None:
+            self._context = ssl.create_default_context(cafile=certifi.where())
+        return self._context
+
+    @context.setter
+    def context(self, val):
+        self._context = val
 
     def retrieve_limited_sets(self) -> SetDictionary:
         self.limited_sets = SetDictionary()
@@ -261,7 +271,9 @@ class LimitedSets:
                     else:
                         temp_dict.data[set_code] = set_fields
 
-        temp_dict.data.update(read_sets.data)
+        for k, v in read_sets.data.items():
+            if k not in temp_dict.data:
+                temp_dict.data[k] = v
         temp_dict.data.update(alchemy_sets)
         temp_dict.latest_set = str(read_sets.latest_set)  # Cast to str for tests
         return temp_dict

@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 2. Landing Page Version Badge Logic
     const latestVersionEl = document.getElementById('latest-version');
     if (latestVersionEl) {
-        fetch('https://api.github.com/repos/unrealities/MTGA_Draft_17Lands/releases/latest')
+        fetch('https://api.github.com/repos/warsier/MTGA_Draft_17Lands/releases/latest')
             .then(res => res.json())
             .then(data => {
                 if (data.tag_name) {
@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 3. Past Releases Page Logic
     const releasesListEl = document.getElementById('releases-list');
     if (releasesListEl) {
-        fetch('https://api.github.com/repos/unrealities/MTGA_Draft_17Lands/releases')
+        fetch('https://api.github.com/repos/warsier/MTGA_Draft_17Lands/releases')
             .then(res => res.json())
             .then(data => {
                 releasesListEl.innerHTML = '';
@@ -123,6 +123,10 @@ function escapeHTML(value) {
 }
 
 function safeWebURL(value) {
+    if (!value) return '#';
+    if (!value.includes(':')) {
+        return value.replace(/["'<>]/g, '');
+    }
     try {
         const url = new URL(value);
         return ['https:', 'http:'].includes(url.protocol) ? url.href : '#';
@@ -280,17 +284,19 @@ function fetchManifest() {
 
 // Visual Badges Helper
 function getFormatBadge(format) {
-    if (format.includes('Premier')) return `<span class="bg-blue-600/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded text-xs">${format}</span>`;
-    if (format.includes('Quick')) return `<span class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-xs">${format}</span>`;
-    if (format.includes('Trad')) return `<span class="bg-amber-600/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-xs">${format}</span>`;
-    if (format.includes('Sealed')) return `<span class="bg-purple-600/20 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded text-xs">${format}</span>`;
-    return `<span class="bg-slate-600/20 text-slate-400 border border-slate-500/30 px-2 py-0.5 rounded text-xs">${format}</span>`;
+    const safeFormat = escapeHTML(format || '');
+    if (safeFormat.includes('Premier')) return `<span class="bg-blue-600/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded text-xs">${safeFormat}</span>`;
+    if (safeFormat.includes('Quick')) return `<span class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-xs">${safeFormat}</span>`;
+    if (safeFormat.includes('Trad')) return `<span class="bg-amber-600/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-xs">${safeFormat}</span>`;
+    if (safeFormat.includes('Sealed')) return `<span class="bg-purple-600/20 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded text-xs">${safeFormat}</span>`;
+    return `<span class="bg-slate-600/20 text-slate-400 border border-slate-500/30 px-2 py-0.5 rounded text-xs">${safeFormat}</span>`;
 }
 
 function getUserBadge(userGroup) {
     const ug = userGroup || "All";
-    if (ug.toLowerCase() === 'top') return `<span class="bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-xs font-semibold">Top</span>`;
-    return `<span class="bg-slate-700/50 text-slate-300 border border-slate-600/50 px-2 py-0.5 rounded text-xs">${ug}</span>`;
+    const safeUg = escapeHTML(ug);
+    if (safeUg.toLowerCase() === 'top') return `<span class="bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded text-xs font-semibold">Top</span>`;
+    return `<span class="bg-slate-700/50 text-slate-300 border border-slate-600/50 px-2 py-0.5 rounded text-xs">${safeUg}</span>`;
 }
 
 function renderActivityTable() {
@@ -303,16 +309,17 @@ function renderActivityTable() {
     }
 
     activityData.forEach(u => {
+        const gameCountStr = Number(u.game_count || 0).toLocaleString();
         tbody.innerHTML += `
             <tr class="hover:bg-slate-700/20 transition-colors">
-                <td class="p-4 font-bold text-slate-200">${u.set}</td>
+                <td class="p-4 font-bold text-slate-200">${escapeHTML(u.set)}</td>
                 <td class="p-4">${getFormatBadge(u.format)}</td>
                 <td class="p-4">${getUserBadge(u.user_group)}</td>
-                <td class="p-4 text-slate-400 text-sm whitespace-nowrap">${u.start_date || '?'} <span class="text-slate-600 px-1">→</span> ${u.end_date || '?'}</td>
-                <td class="p-4 text-right text-emerald-400/90">${u.game_count.toLocaleString()}</td>
-                <td class="p-4 text-right text-slate-400">${u.size_kb}</td>
+                <td class="p-4 text-slate-400 text-sm whitespace-nowrap">${escapeHTML(u.start_date || '?')} <span class="text-slate-600 px-1">→</span> ${escapeHTML(u.end_date || '?')}</td>
+                <td class="p-4 text-right text-emerald-400/90">${escapeHTML(gameCountStr)}</td>
+                <td class="p-4 text-right text-slate-400">${escapeHTML(u.size_kb)}</td>
                 <td class="p-4 text-center">
-                    <a href="${u.filename}" download class="inline-block bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/30 rounded py-1 px-3 text-xs font-semibold transition shadow-sm">Download</a>
+                    <a href="${escapeHTML(safeWebURL(u.filename))}" download class="inline-block bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/30 rounded py-1 px-3 text-xs font-semibold transition shadow-sm">Download</a>
                 </td>
             </tr>
         `;
@@ -380,23 +387,23 @@ function renderManifestList(dataArray) {
             const userStr = ds.id.split('_')[2] || "All";
 
             const dateStr = (ds.start_date && ds.end_date)
-                ? `<div class="text-xs text-slate-500 mt-2 font-mono flex items-center gap-1"><svg class="w-3 h-3 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg> ${ds.start_date} <span class="text-slate-600">→</span> ${ds.end_date}</div>`
+                ? `<div class="text-xs text-slate-500 mt-2 font-mono flex items-center gap-1"><svg class="w-3 h-3 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg> ${escapeHTML(ds.start_date)} <span class="text-slate-600">→</span> ${escapeHTML(ds.end_date)}</div>`
                 : '';
 
             listEl.innerHTML += `
                 <div class="dataset-item p-3 mb-2 bg-slate-800/40 rounded-lg border border-slate-700/50 hover:border-slate-500 transition-colors flex flex-col group">
                     <div class="flex justify-between items-start mb-2">
                         <div>
-                            <span class="font-bold text-sm text-slate-200 block mb-1">${ds.id.split('_')[0]}</span>
+                            <span class="font-bold text-sm text-slate-200 block mb-1">${escapeHTML(ds.id.split('_')[0])}</span>
                             <div class="flex gap-2">
                                 ${getFormatBadge(formatStr)}
                                 ${getUserBadge(userStr)}
                             </div>
                             ${dateStr}
                         </div>
-                        <span class="text-xs text-slate-400 whitespace-nowrap">${ds.size_kb} KB</span>
+                        <span class="text-xs text-slate-400 whitespace-nowrap">${escapeHTML(ds.size_kb)} KB</span>
                     </div>
-                    <a href="${ds.filename}" download class="text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/30 rounded py-1.5 px-2 mt-2 text-center transition opacity-0 group-hover:opacity-100">
+                    <a href="${escapeHTML(safeWebURL(ds.filename))}" download class="text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border border-blue-500/30 rounded py-1.5 px-2 mt-2 text-center transition opacity-0 group-hover:opacity-100">
                         Download .json.gz
                     </a>
                 </div>

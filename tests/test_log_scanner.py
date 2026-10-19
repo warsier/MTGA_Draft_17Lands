@@ -36,40 +36,53 @@ TEST_SETS_DIRECTORY = os.path.join(os.getcwd(), "tests", "data")
 
 
 @pytest.fixture(name="session_scanner", scope="session")
-def fixture_session_scanner():
+def fixture_session_scanner(tmp_path_factory):
+    tmp_dir = tmp_path_factory.mktemp("log_scanner_session")
+    log_file = str(tmp_dir / "Player.log")
+    state_file = str(tmp_dir / "active_draft_state.json")
+
+    global TEST_LOG_FILE_LOCATION
+    TEST_LOG_FILE_LOCATION = log_file
+
     scanner = ArenaScanner(
-        TEST_LOG_FILE_LOCATION,
+        log_file,
         TEST_SETS,
         sets_location=TEST_LOG_DIRECTORY,
         retrieve_unknown=True,
+        state_file=state_file,
     )
     scanner.log_enable(False)
     yield scanner
-    if os.path.exists(TEST_LOG_FILE_LOCATION):
-        os.remove(TEST_LOG_FILE_LOCATION)
+    if os.path.exists(log_file):
+        os.remove(log_file)
 
 
 @pytest.fixture(name="function_scanner", scope="function")
-def fixture_function_scanner():
-    if os.path.exists(TEST_LOG_FILE_LOCATION):
-        os.remove(TEST_LOG_FILE_LOCATION)
+def fixture_function_scanner(tmp_path):
+    log_file = str(tmp_path / "Player.log")
+    state_file = str(tmp_path / "active_draft_state.json")
+
+    global TEST_LOG_FILE_LOCATION
+    old_log_location = TEST_LOG_FILE_LOCATION
+    TEST_LOG_FILE_LOCATION = log_file
+
     scanner = ArenaScanner(
-        TEST_LOG_FILE_LOCATION,
+        log_file,
         TEST_SETS,
         sets_location=TEST_SETS_DIRECTORY,
         retrieve_unknown=False,
+        state_file=state_file,
     )
     scanner.log_enable(False)
     yield scanner
-    if os.path.exists(TEST_LOG_FILE_LOCATION):
-        os.remove(TEST_LOG_FILE_LOCATION)
+    TEST_LOG_FILE_LOCATION = old_log_location
 
 
 def event_test_cases(input_scanner, event_label, entry_label, expected, entry_string):
     """Generic test cases for verifying the log events"""
     # Write the entry to the fake Player.log file
     with open(
-        TEST_LOG_FILE_LOCATION, "a", encoding="utf-8", errors="replace"
+        input_scanner.arena_file, "a", encoding="utf-8", errors="replace"
     ) as log_file:
         log_file.write(f"{entry_string}\n")
 
@@ -462,6 +475,7 @@ def test_draft_state_recovery(function_scanner):
         TEST_SETS,
         sets_location=TEST_SETS_DIRECTORY,
         retrieve_unknown=True,
+        state_file=function_scanner.state_file,
     )
 
     # 4. Verify the new scanner perfectly recovered the state from disk!

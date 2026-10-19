@@ -5,12 +5,22 @@ import re
 from datetime import datetime, timezone, timedelta
 from server import config
 from server.transform import parse_scryfall_types
-from src.utils import normalize_color_string
+from src.utils import normalize_color_string, sanitize_card_name
 
 logger = logging.getLogger(__name__)
 
 SCRYFALL_CACHE_DIR = os.path.join(os.path.dirname(config.OUTPUT_DIR), ".scryfall_cache")
 os.makedirs(SCRYFALL_CACHE_DIR, exist_ok=True)
+
+
+def _unwrap_card_payload(payload) -> list:
+    """Extract card items list from raw API response payload."""
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        return data if isinstance(data, list) else []
+    elif isinstance(payload, list):
+        return payload
+    return []
 
 
 def extract_scryfall_data(client, set_code: str) -> dict:
@@ -56,7 +66,7 @@ def extract_scryfall_data(client, set_code: str) -> dict:
             break
 
         for c in data.get("data", []):
-            name = c.get("name", "").replace("///", "//")
+            name = sanitize_card_name(c.get("name", "").replace("///", "//"))
             if not name:
                 continue
 
@@ -158,7 +168,7 @@ def extract_scryfall_tags(client, set_code: str) -> dict:
 
                 data = resp.json()
                 for c in data.get("data", []):
-                    name = c.get("name", "").replace("///", "//")
+                    name = sanitize_card_name(c.get("name", "").replace("///", "//"))
                     tags_map.setdefault(name, [])
                     if tag_key not in tags_map[name]:
                         tags_map[name].append(tag_key)
@@ -207,15 +217,27 @@ def extract_17lands_data(
             params["user_group"] = user_group.lower()
 
         try:
-            payload = client.respectful_get(base_url, params=params).json()
+            resp = client.respectful_get(base_url, params=params, allow_404=True)
+            if getattr(resp, "status_code", None) == 404:
+                logger.info(
+                    f"   [17Lands] {color} returned 404 for {set_code} ({draft_format})."
+                )
+                if color == "All Decks":
+                    break
+                continue
+
+            if hasattr(resp, "raise_for_status"):
+                resp.raise_for_status()
+
+            payload = resp.json()
             # /api/card_data wraps the card list in {copyright, notes, data}
-            data = payload.get("data") or [] if isinstance(payload, dict) else payload
+            data = _unwrap_card_payload(payload)
             if color == "All Decks" and not data:
                 break
 
             archetype_data[color] = {}
             for card in data:
-                name = card.get("name", "").replace("///", "//")
+                name = sanitize_card_name(card.get("name", "").replace("///", "//"))
                 mtga_id = card.get("mtga_id") or card.get("arena_id")
                 if not mtga_id and "url" in card:
                     match = re.search(r"card_id=(\d+)", card.get("url", ""))
@@ -259,7 +281,13 @@ def extract_17lands_data(
                     archetype_data[color][name]["17lands_images"] = imgs
 
         except Exception as e:
-            logger.warning(f"Failed to fetch {color} for {set_code}: {e}")
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status == 404:
+                if color == "All Decks":
+                    break
+                continue
+            logger.error(f"Failed to fetch {color} for {set_code}: {e}")
+            raise
 
     return archetype_data
 
@@ -289,7 +317,17 @@ def extract_color_ratings(
     total_games = 0
 
     try:
-        data = client.respectful_get(url, params=params).json()
+        resp = client.respectful_get(url, params=params, allow_404=True)
+        if getattr(resp, "status_code", None) == 404:
+            logger.info(
+                f"   [17Lands] Color ratings returned 404 for {set_code} {draft_format}."
+            )
+            return ratings, games_played, total_games
+
+        if hasattr(resp, "raise_for_status"):
+            resp.raise_for_status()
+
+        data = resp.json()
         for entry in data:
             if entry.get("is_summary"):
                 if "All Decks" in entry.get("color_name", ""):
@@ -318,7 +356,11 @@ def extract_color_ratings(
                     games_played[color_key] = games
 
     except Exception as e:
-        logger.warning(f"Failed to fetch color ratings: {e}")
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 404:
+            return ratings, games_played, total_games
+        logger.error(f"Failed to fetch color ratings for {set_code}: {e}")
+        raise
 
     return ratings, games_played, total_games
 
@@ -360,7 +402,7 @@ def extract_basic_lands(client) -> dict:
             break
 
         for c in data.get("data", []):
-            name = c.get("name", "").replace("///", "//")
+            name = sanitize_card_name(c.get("name", "").replace("///", "//"))
             if name not in [
                 "Plains",
                 "Island",
@@ -453,7 +495,7 @@ def extract_scryfall_by_names(client, names: list) -> dict:
                 break
 
             for c in data.get("data", []):
-                name = c.get("name", "").replace("///", "//")
+                name = sanitize_card_name(c.get("name", "").replace("///", "//"))
                 if not name:
                     continue
 

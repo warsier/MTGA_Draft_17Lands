@@ -5,6 +5,7 @@ Professional Card Comparison Workspace.
 
 import tkinter
 from tkinter import ttk
+import ttkbootstrap as tb
 from src import constants
 from src.ui.styles import Theme
 from src.ui.components import DynamicTreeviewManager, AutocompleteEntry, CardToolTip
@@ -35,7 +36,7 @@ class ComparePanel(ttk.Frame):
         bar = ttk.Frame(self, style="Card.TFrame", padding=Theme.scaled_val(5))
         bar.pack(fill="x", pady=Theme.scaled_val((0, 5)))
 
-        ttk.Label(
+        tb.Label(
             bar,
             text="SEARCH:",
             font=Theme.scaled_font(8, "bold"),

@@ -1,6 +1,7 @@
 import tkinter
 import threading
 from tkinter import ttk, messagebox
+import ttkbootstrap as tb
 import os
 from datetime import datetime
 from typing import Callable
@@ -31,11 +32,11 @@ class TierListWindow(ttk.Frame):
         top_bar = ttk.Frame(container)
         top_bar.pack(fill="x", pady=Theme.scaled_val((0, 5)))
 
-        ttk.Label(top_bar, text="IMPORTED TIER LISTS", bootstyle="secondary").pack(
+        tb.Label(top_bar, text="IMPORTED TIER LISTS", bootstyle="secondary").pack(
             side="left"
         )
 
-        self.btn_delete = ttk.Button(
+        self.btn_delete = tb.Button(
             top_bar,
             text="Delete Selected",
             bootstyle="danger-outline",
@@ -50,7 +51,7 @@ class TierListWindow(ttk.Frame):
         self.combo_filter.pack(side="right")
         self.combo_filter.bind("<<ComboboxSelected>>", lambda e: self.refresh())
 
-        ttk.Label(top_bar, text="Filter:", bootstyle="secondary").pack(
+        tb.Label(top_bar, text="Filter:", bootstyle="secondary").pack(
             side="right", padx=Theme.scaled_val(5)
         )
 
@@ -73,13 +74,13 @@ class TierListWindow(ttk.Frame):
             container, style="Card.TFrame", padding=Theme.scaled_val(15)
         )
         form_frame.pack(fill="x")
-        ttk.Label(
+        tb.Label(
             form_frame,
             text="IMPORT NEW TIER LIST",
             font=Theme.scaled_font(9, "bold"),
             bootstyle="primary",
         ).pack(anchor="w", pady=Theme.scaled_val((0, 10)))
-        ttk.Label(form_frame, text="17LANDS URL:", bootstyle="secondary").pack(
+        tb.Label(form_frame, text="17LANDS URL:", bootstyle="secondary").pack(
             anchor="w"
         )
         self.vars["url"] = tkinter.StringVar(
@@ -87,7 +88,7 @@ class TierListWindow(ttk.Frame):
         )
         self.entry_url = ttk.Entry(form_frame, textvariable=self.vars["url"])
         self.entry_url.pack(fill="x", pady=Theme.scaled_val((2, 10)))
-        ttk.Label(
+        tb.Label(
             form_frame, text="CUSTOM LABEL (e.g. 'Pro Review'):", bootstyle="secondary"
         ).pack(anchor="w")
         self.vars["label"] = tkinter.StringVar()
@@ -98,7 +99,7 @@ class TierListWindow(ttk.Frame):
         )
         self.btn_import.pack(fill="x")
         self.vars["status"] = tkinter.StringVar(value="Ready")
-        ttk.Label(
+        tb.Label(
             form_frame, textvariable=self.vars["status"], bootstyle="secondary"
         ).pack(pady=Theme.scaled_val((5, 0)))
 

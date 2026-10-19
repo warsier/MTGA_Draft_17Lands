@@ -21,6 +21,11 @@ class TestSettingsWindow:
         yield root
         root.destroy()
 
+    @pytest.fixture(autouse=True)
+    def isolate_config_writes(self):
+        with patch("src.ui.windows.settings.write_configuration") as mock_write:
+            yield mock_write
+
     @pytest.fixture
     def config(self):
         return Configuration(
@@ -66,8 +71,9 @@ class TestSettingsWindow:
         assert config.settings.always_on_top is True
         assert mock_write.called
 
+    @patch("src.ui.windows.settings.write_configuration")
     @patch("src.ui.windows.settings.reset_configuration")
-    def test_reset_defaults_flow(self, mock_reset, root, config):
+    def test_reset_defaults_flow(self, mock_reset, mock_write, root, config):
         """Verify the reset button triggers logic and reloads the UI correctly."""
         window = SettingsWindow(root, config, MagicMock())
 

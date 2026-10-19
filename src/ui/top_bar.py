@@ -6,6 +6,7 @@ Mini Mode toggle, and all dynamic dataset/format dropdowns.
 
 import tkinter
 from tkinter import ttk
+import ttkbootstrap as tb
 import os
 import re
 import logging
@@ -25,6 +26,7 @@ class TopBarControls(ttk.Frame):
         super().__init__(parent, padding=Theme.scaled_val(5))
         self.app = app_context
         self.history_files = {}
+        self._last_dot_style = None
 
         self._build_ui()
 
@@ -33,12 +35,12 @@ class TopBarControls(ttk.Frame):
         row1 = ttk.Frame(self)
         row1.pack(fill="x", pady=(0, Theme.scaled_val(5)))
 
-        self.status_dot = ttk.Label(
+        self.status_dot = tb.Label(
             row1, text="●", font=Theme.scaled_font(16), bootstyle="secondary"
         )
         self.status_dot.pack(side="left", padx=Theme.scaled_val(5))
 
-        self.lbl_status = ttk.Label(
+        self.lbl_status = tb.Label(
             row1,
             textvariable=self.app.vars["status_text"],
             font=Theme.scaled_font(11, "bold"),
@@ -46,7 +48,7 @@ class TopBarControls(ttk.Frame):
         )
         self.lbl_status.pack(side="left", padx=(0, Theme.scaled_val(10)))
 
-        ttk.Button(
+        tb.Button(
             row1,
             text="Mini Mode",
             bootstyle="info-outline",
@@ -64,13 +66,13 @@ class TopBarControls(ttk.Frame):
         )
         self.combo_history.pack(side="right", padx=Theme.scaled_val(10))
         self.combo_history.bind("<<ComboboxSelected>>", self._on_history_select)
-        self.combo_history.bind("<Button-1>", lambda e: self.update_history_dropdown())
+        self.combo_history.bind("<Button-1>", lambda e: self.update_history_dropdown(force=True))
 
         # ROW 2: Controls
         row2 = ttk.Frame(self)
         row2.pack(fill="x")
 
-        self.btn_reload = ttk.Button(
+        self.btn_reload = tb.Button(
             row2,
             text="Reload",
             command=self.app._force_reload,
@@ -126,9 +128,10 @@ class TopBarControls(ttk.Frame):
 
     def update_status_dot(self, current_ts, prev_ts):
         """Updates the status dot color to indicate if the log is actively writing."""
-        self.status_dot.config(
-            bootstyle="success" if current_ts != prev_ts else "secondary"
-        )
+        target_style = "success" if current_ts != prev_ts else "secondary"
+        if getattr(self, "_last_dot_style", None) != target_style:
+            self._last_dot_style = target_style
+            self.status_dot.config(bootstyle=target_style)
 
     def update_auto_detect_label(self, colors):
         """Updates the label that tells the user what lane 'Auto' has detected."""
@@ -148,13 +151,30 @@ class TopBarControls(ttk.Frame):
 
     # --- DROPDOWN POPULATORS ---
 
-    def update_history_dropdown(self):
+    def update_history_dropdown(self, force: bool = False):
+        folder = constants.DRAFT_LOG_FOLDER
+        folder_mtime = os.path.getmtime(folder) if os.path.exists(folder) else 0.0
+        live_path = self.app.configuration.settings.arena_log_location
+        set_display = getattr(self.app, "detected_set_code", "Arena")
+        cache_key = (folder_mtime, live_path, set_display)
+
+        if not force and hasattr(self, "_last_history_key") and self._last_history_key == cache_key:
+            current_log = os.path.basename(self.app.orchestrator.scanner.arena_file)
+            target_option = self.combo_history["values"][0] if self.combo_history["values"] else ""
+            for opt, path in getattr(self, "history_files", {}).items():
+                if os.path.basename(path) == current_log:
+                    target_option = opt
+                    break
+            current_selection = self.app.vars["set_label"].get()
+            if "Missing Dataset" not in current_selection and target_option:
+                self.app.vars["set_label"].set(target_option)
+            return
+
+        self._last_history_key = cache_key
         self.history_files = {}
         options = []
 
-        live_path = self.app.configuration.settings.arena_log_location
         if live_path and os.path.exists(live_path):
-            set_display = getattr(self.app, "detected_set_code", "Arena")
             if (
                 hasattr(self.app.orchestrator.scanner, "set_list")
                 and self.app.orchestrator.scanner.set_list.data

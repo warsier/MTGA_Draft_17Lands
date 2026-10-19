@@ -11,6 +11,7 @@ import re
 import logging
 import threading
 import time
+import tempfile
 from enum import Enum
 from datetime import datetime
 
@@ -51,13 +52,16 @@ class ArenaScanner:
         step_through: bool = False,
         retrieve_unknown: bool = False,
         db_path: str = None,
+        state_file: str = None,
     ):
         self.arena_file = filename
         self.set_list = set_list
         self.draft_log = logging.getLogger(LOG_TYPE_DRAFT)
         self.draft_log.setLevel(logging.INFO)
         self.sets_location = sets_location
-        self.state_file = os.path.join(constants.TEMP_FOLDER, "active_draft_state.json")
+        self.state_file = state_file or os.path.join(
+            constants.TEMP_FOLDER, "active_draft_state.json"
+        )
 
         # CENTRAL DATA LOCK: Co-ordinates UI and Background Threading
         self.lock = threading.RLock()
@@ -144,7 +148,7 @@ class ArenaScanner:
             if os.path.abspath(self.arena_file) == os.path.abspath(log_path):
                 return
 
-            for handler in self.draft_log.handlers:
+            for handler in list(self.draft_log.handlers):
                 if isinstance(handler, logging.FileHandler):
                     self.draft_log.removeHandler(handler)
                     handler.close()
@@ -237,8 +241,12 @@ class ArenaScanner:
                 "draft_history": self.draft_history,
                 "draft_start_time": self.draft_start_time,
             }
-            with open(self.state_file, "w", encoding="utf-8") as f:
+            dir_name = os.path.dirname(self.state_file) or "."
+            os.makedirs(dir_name, exist_ok=True)
+            with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, encoding="utf-8") as f:
                 json.dump(state, f)
+                temp_name = f.name
+            os.replace(temp_name, self.state_file)
         except Exception as e:
             logger.error(f"Failed to save draft state: {e}")
 
@@ -304,6 +312,7 @@ class ArenaScanner:
         event_line = ""
         draft_id = ""
 
+        last_timestamp = None
         try:
             with open(self.arena_file, "r", encoding="utf-8", errors="replace") as log:
                 log.seek(offset)
@@ -316,14 +325,10 @@ class ArenaScanner:
 
                     offset = log.tell()
 
-                    with self.lock:
-                        self.search_offset = offset
-
                     if line.startswith("[UnityCrossThreadLogger]"):
                         content = line[24:].strip()
                         if content and content[0].isdigit() and (":" in content):
-                            with self.lock:
-                                self._last_seen_timestamp = content
+                            last_timestamp = content
 
                     start_offset = detect_string(line, constants.DRAFT_START_STRINGS)
 
@@ -337,6 +342,9 @@ class ArenaScanner:
                             draft_id = did
                             event_line = line
                             with self.lock:
+                                self.search_offset = offset
+                                if last_timestamp:
+                                    self._last_seen_timestamp = last_timestamp
                                 self.draft_start_offset = offset
                                 self.draft_start_time = self._last_seen_timestamp
 
@@ -358,6 +366,9 @@ class ArenaScanner:
                                         event_line = line
                                         card_pool = json_find("CardPool", event_data)
                                         with self.lock:
+                                            self.search_offset = offset
+                                            if last_timestamp:
+                                                self._last_seen_timestamp = last_timestamp
                                             self.draft_start_offset = offset
                                             if card_pool:
                                                 self.taken_cards = [
@@ -365,6 +376,11 @@ class ArenaScanner:
                                                 ]
                         except Exception as e:
                             logger.error(f"Error parsing Deck Recovery line: {e}")
+
+            with self.lock:
+                self.search_offset = offset
+                if last_timestamp:
+                    self._last_seen_timestamp = last_timestamp
 
             if update:
                 with self.lock:
@@ -593,16 +609,7 @@ class ArenaScanner:
         with self.lock:
             self._check_and_wipe_stale_pool(pack, pick, pack_cards, draft_id, is_pack=True)
 
-            expected_players = (
-                4
-                if self.draft_type
-                in [
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO,
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO_TRAD,
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO_QUICK,
-                ]
-                else 8
-            )
+            expected_players = self.expected_players
             self.number_of_players = expected_players
 
             # Handle Pack Transitions securely
@@ -676,16 +683,7 @@ class ArenaScanner:
             # Enforce maximum cards per pick to prevent MTGA JSON array-bloat bugs
             cards = cards[: self.cards_per_pick]
 
-            expected_players = (
-                4
-                if self.draft_type
-                in [
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO,
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO_TRAD,
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO_QUICK,
-                ]
-                else 8
-            )
+            expected_players = self.expected_players
             self.number_of_players = expected_players
 
             # Prevent duplicate processing of historical picks when reconstructing state
@@ -704,6 +702,12 @@ class ArenaScanner:
 
             self.picked_cards[pack_index].extend(cards)
             self.taken_cards.extend(cards)
+
+            # Record picked cards in draft_history
+            for entry in self.draft_history:
+                if entry.get("Pack") == pack and entry.get("Pick") == pick:
+                    entry["Picked"] = list(cards)
+                    break
 
             self.previous_picked_pack = pack
             self.current_picked_pick = pick
@@ -803,17 +807,29 @@ class ArenaScanner:
         # RECOVERY MODE: If the app restarts mid-draft and misses EventJoin,
         # infer the draft type from the active log events.
         if self.draft_type == constants.LIMITED_TYPE_UNKNOWN:
+            saved_pack_offset = self.pack_offset
+            saved_pick_offset = self.pick_offset
+            saved_pool_offset = self.pool_offset
+
             if self._search_pack_notify() or self._search_pick_human():
                 self.draft_type = constants.LIMITED_TYPE_DRAFT_PREMIER_V2
                 self.number_of_players = 8
                 explicit_update = True
-            elif self._search_pack_bot() or self._search_pick_bot():
-                self.draft_type = constants.LIMITED_TYPE_DRAFT_QUICK
-                self.number_of_players = 8
-                explicit_update = True
-            elif self._search_card_pool():
-                self.draft_type = constants.LIMITED_TYPE_SEALED
-                explicit_update = True
+            else:
+                self.pack_offset = saved_pack_offset
+                self.pick_offset = saved_pick_offset
+                if self._search_pack_bot() or self._search_pick_bot():
+                    self.draft_type = constants.LIMITED_TYPE_DRAFT_QUICK
+                    self.number_of_players = 8
+                    explicit_update = True
+                else:
+                    self.pack_offset = saved_pack_offset
+                    self.pick_offset = saved_pick_offset
+                    if self._search_card_pool():
+                        self.draft_type = constants.LIMITED_TYPE_SEALED
+                        explicit_update = True
+                    else:
+                        self.pool_offset = saved_pool_offset
 
         if self.draft_type == constants.LIMITED_TYPE_DRAFT_PREMIER_V1:
             explicit_update |= self._search_pick_v1()
@@ -1184,16 +1200,7 @@ class ArenaScanner:
             if self.current_pick == 0:
                 return []
 
-            expected_players = (
-                4
-                if self.draft_type
-                in [
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO,
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO_TRAD,
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO_QUICK,
-                ]
-                else 8
-            )
+            expected_players = self.expected_players
 
             pack_index = (self.current_pick - 1) % expected_players
             if pack_index < len(self.picked_cards):
@@ -1203,16 +1210,7 @@ class ArenaScanner:
     def retrieve_current_missing_cards(self):
         with self.lock:
             try:
-                expected_players = (
-                    4
-                    if self.draft_type
-                    in [
-                        constants.LIMITED_TYPE_DRAFT_PICK_TWO,
-                        constants.LIMITED_TYPE_DRAFT_PICK_TWO_TRAD,
-                        constants.LIMITED_TYPE_DRAFT_PICK_TWO_QUICK,
-                    ]
-                    else 8
-                )
+                expected_players = self.expected_players
 
                 pack_index = (self.current_pick - 1) % expected_players
                 if pack_index < len(self.pack_cards) and pack_index < len(
@@ -1233,16 +1231,7 @@ class ArenaScanner:
             if self.current_pick == 0:
                 return []
 
-            expected_players = (
-                4
-                if self.draft_type
-                in [
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO,
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO_TRAD,
-                    constants.LIMITED_TYPE_DRAFT_PICK_TWO_QUICK,
-                ]
-                else 8
-            )
+            expected_players = self.expected_players
 
             pack_index = (self.current_pick - 1) % expected_players
             if pack_index < len(self.pack_cards):
@@ -1283,6 +1272,17 @@ class ArenaScanner:
             return []
 
     @property
+    def expected_players(self) -> int:
+        """Returns the expected number of players (4 for PickTwo, 8 for standard drafts)."""
+        if self.draft_type in (
+            constants.LIMITED_TYPE_DRAFT_PICK_TWO,
+            constants.LIMITED_TYPE_DRAFT_PICK_TWO_TRAD,
+            constants.LIMITED_TYPE_DRAFT_PICK_TWO_QUICK,
+        ):
+            return 4
+        return 8
+
+    @property
     def cards_per_pick(self):
         """Returns the number of cards taken per passing round (usually 1, or 2 for PickTwo)."""
         if self.draft_type in [
@@ -1311,12 +1311,22 @@ class ArenaScanner:
             and self.draft_history[-1]["Pack"] == pack
             and self.draft_history[-1]["Pick"] == pick
         ):
+            self.draft_history[-1]["Cards"] = card_ids
             return
         if not self.draft_history or (
             self.draft_history[-1]["Pack"] != pack
             or self.draft_history[-1]["Pick"] != pick
         ):
-            self.draft_history.append({"Pack": pack, "Pick": pick, "Cards": card_ids})
+            new_entry = {"Pack": pack, "Pick": pick, "Cards": card_ids}
+            pack_index = (pick - 1) % self.expected_players
+            if (
+                pack_index < len(self.picked_cards)
+                and self.previous_picked_pack == pack
+                and self.current_picked_pick == pick
+                and self.picked_cards[pack_index]
+            ):
+                new_entry["Picked"] = list(self.picked_cards[pack_index])
+            self.draft_history.append(new_entry)
 
     def retrieve_draft_history(self):
         with self.lock:

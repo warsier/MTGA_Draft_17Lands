@@ -7,6 +7,7 @@ Monte Carlo simulations on their custom creations.
 
 import tkinter
 from tkinter import ttk
+import ttkbootstrap as tb
 from typing import Dict, Any, List
 import random
 import requests
@@ -29,7 +30,15 @@ from src.card_logic import (
     get_functional_cmc,
 )
 from src.ui.styles import Theme
-from src.ui.components import DynamicTreeviewManager, CardToolTip, AutoScrollbar
+from src.ui.components import DynamicTreeviewManager, CardToolTip, AutoScrollbar, CardImageLoader
+from src.ui.deck_views import (
+    show_sim_loading,
+    show_sim_error,
+    show_sim_results,
+    render_deck_stats,
+    clear_sample_hand,
+    draw_sample_hand,
+)
 from src.utils import bind_scroll, normalize_color_string
 
 
@@ -44,7 +53,7 @@ class CustomDeckPanel(ttk.Frame):
         self.sb_list: List[Dict] = []
         self.known_pool_size = 0
 
-        self.image_executor = ThreadPoolExecutor(max_workers=4)
+        self.image_executor = CardImageLoader._image_executor
         self.sim_executor = ThreadPoolExecutor(max_workers=1)
         self.hand_images = []
         self.hand_frames = []
@@ -142,14 +151,14 @@ class CustomDeckPanel(ttk.Frame):
         self.header = ttk.Frame(self, style="Card.TFrame", padding=Theme.scaled_val(5))
         self.header.pack(fill="x", pady=Theme.scaled_val((0, 5)))
 
-        ttk.Button(
+        tb.Button(
             self.header,
             text="Clear",
             bootstyle="danger-outline",
             command=self._clear_deck,
         ).pack(side="left", padx=Theme.scaled_val(5))
 
-        ttk.Button(
+        tb.Button(
             self.header,
             text="Auto-Lands",
             bootstyle="info",
@@ -169,7 +178,7 @@ class CustomDeckPanel(ttk.Frame):
             ("G", "Forest", "success"),
         ]
         for sym, name, style in basics:
-            btn = ttk.Button(
+            btn = tb.Button(
                 self.basics_frame,
                 text=f"{sym}: 0",
                 bootstyle=style,
@@ -193,12 +202,12 @@ class CustomDeckPanel(ttk.Frame):
             btn.pack(side="left")
             self.basic_buttons[name] = btn
 
-        self.btn_copy = ttk.Button(
+        self.btn_copy = tb.Button(
             self.header, text="Copy Deck", width=10, command=self._copy_to_clipboard
         )
         self.btn_copy.pack(side="right", padx=Theme.scaled_val(5))
 
-        self.btn_sim = ttk.Button(
+        self.btn_sim = tb.Button(
             self.header,
             text="Analyze",
             bootstyle="success",
@@ -288,7 +297,7 @@ class CustomDeckPanel(ttk.Frame):
         hand_control_bar.grid(
             row=0, column=0, columnspan=2, sticky="ew", pady=Theme.scaled_val((0, 15))
         )
-        ttk.Button(
+        tb.Button(
             hand_control_bar,
             text="Draw New Hand",
             command=self._draw_sample_hand,
@@ -296,7 +305,7 @@ class CustomDeckPanel(ttk.Frame):
             width=16,
         ).pack(side="left", padx=Theme.scaled_val(5))
 
-        self.btn_optimize = ttk.Button(
+        self.btn_optimize = tb.Button(
             hand_control_bar,
             text="🤖 Auto-Optimize Deck",
             command=self._auto_optimize_deck,
@@ -529,456 +538,38 @@ class CustomDeckPanel(ttk.Frame):
             self.after(0, show_err)
 
     def _show_sim_loading(self, msg="Running 10,000 Monte Carlo Simulations..."):
-        for widget in self.sim_frame.winfo_children():
-            widget.destroy()
-
-        lbl = ttk.Label(
-            self.sim_frame,
-            text=msg,
-            font=Theme.scaled_font(10, "italic"),
-            bootstyle="secondary",
-            justify="center",
-            wraplength=Theme.scaled_val(300),
-        )
-        lbl.is_dynamic_wrap = True
-        lbl.pack(pady=Theme.scaled_val(20))
-
-        progress = ttk.Progressbar(self.sim_frame, mode="indeterminate")
-        progress.pack(fill="x", padx=Theme.scaled_val(20))
-        progress.start(15)
+        show_sim_loading(getattr(self, "sim_frame", None), msg)
 
     def _show_sim_error(self, error):
-        for widget in self.sim_frame.winfo_children():
-            widget.destroy()
-        lbl = ttk.Label(
-            self.sim_frame,
-            text=f"Simulation Error:\n{error}",
-            bootstyle="danger",
-            wraplength=Theme.scaled_val(300),
-        )
-        lbl.is_dynamic_wrap = True
-        lbl.pack(pady=Theme.scaled_val(20))
+        show_sim_error(getattr(self, "sim_frame", None), error)
 
     def _show_sim_results(self, stats, optimization_note=None):
-        sim_frame = getattr(self, "sim_frame", None)
-        if not sim_frame or not sim_frame.winfo_exists():
-            return
-
-        for widget in sim_frame.winfo_children():
-            widget.destroy()
-
-        if not stats:
-            ttk.Label(
-                sim_frame,
-                text="Deck must have 40 cards to analyze.",
-                bootstyle="warning",
-            ).pack(pady=Theme.scaled_val(20))
-            return
-
-        def _add_stat(label, value, thresholds, reverse=False, is_percent=True):
-            frame = ttk.Frame(sim_frame)
-            frame.pack(fill="x", pady=Theme.scaled_val(2))
-            ttk.Label(frame, text=label, font=Theme.scaled_font(10, "bold")).pack(
-                side="left"
-            )
-
-            good_val, fair_val = thresholds
-
-            if not reverse:
-                if value >= good_val:
-                    icon, color = "🟢 Great", "success"
-                elif value >= fair_val:
-                    icon, color = "🟡 Fair", "warning"
-                else:
-                    icon, color = "🔴 Poor", "danger"
-            else:
-                if value <= good_val:
-                    icon, color = "🟢 Great", "success"
-                elif value <= fair_val:
-                    icon, color = "🟡 Fair", "warning"
-                else:
-                    icon, color = "🔴 Poor", "danger"
-
-            val_str = f"{value:.1f}%" if is_percent else f"{value:.2f}"
-
-            right_frame = ttk.Frame(frame)
-            right_frame.pack(side="right")
-
-            ttk.Label(
-                right_frame,
-                text=val_str,
-                font=Theme.scaled_font(10, "bold"),
-                width=6,
-                anchor="e",
-            ).pack(side="left", padx=Theme.scaled_val((0, 6)))
-
-            ttk.Label(
-                right_frame,
-                text=icon,
-                font=Theme.scaled_font(10, "bold"),
-                bootstyle=color,
-                anchor="w",
-            ).pack(side="left")
-
-        ttk.Label(
-            sim_frame,
-            text="CONSISTENCY METRICS",
-            bootstyle="primary",
-            font=Theme.scaled_font(10, "bold"),
-        ).pack(anchor="w", pady=Theme.scaled_val((0, 5)))
-
-        _add_stat("T2 Play (2-Drop):", stats["cast_t2"], (65, 50))
-        _add_stat("T3 Play (3-Drop):", stats["cast_t3"], (65, 50))
-        _add_stat("T4 Play (4-Drop):", stats["cast_t4"], (55, 40))
-        _add_stat("Perfect Curve (T2-T4):", stats["curve_out"], (25, 15))
-        _add_stat("Removal by Turn 4:", stats["removal_t4"], (60, 45))
-
-        ttk.Separator(sim_frame).pack(fill="x", pady=Theme.scaled_val(8))
-
-        ttk.Label(
-            sim_frame,
-            text="RISK FACTORS",
-            bootstyle="primary",
-            font=Theme.scaled_font(10, "bold"),
-        ).pack(anchor="w", pady=Theme.scaled_val((0, 5)))
-
-        _add_stat("Mulligan Rate:", stats["mulligans"], (15, 25), reverse=True)
-        _add_stat(
-            "Avg. Hand Size:", stats["avg_hand_size"], (6.8, 6.5), is_percent=False
+        show_sim_results(
+            getattr(self, "sim_frame", None),
+            stats,
+            self.deck_list,
+            self.sb_list,
+            optimization_note,
+            getattr(self, "sim_canvas", None),
+            self.after,
         )
-        _add_stat("Missed 3rd Land Drop:", stats["screw_t3"], (15, 25), reverse=True)
-        _add_stat("Missed 4th Land Drop:", stats["screw_t4"], (25, 35), reverse=True)
-        _add_stat("Color Screwed (T3):", stats["color_screw_t3"], (6, 12), reverse=True)
-        _add_stat("Mana Flooded (T5):", stats["flood_t5"], (20, 30), reverse=True)
-
-        ttk.Separator(sim_frame).pack(fill="x", pady=Theme.scaled_val(8))
-
-        # --- ADVISOR SUMMARY LOGIC ---
-        ttk.Label(
-            sim_frame,
-            text="ADVISOR SUMMARY",
-            bootstyle="info",
-            font=Theme.scaled_font(10, "bold"),
-        ).pack(anchor="w", pady=Theme.scaled_val((0, 5)))
-
-        if optimization_note:
-            lbl_opt = ttk.Label(
-                sim_frame,
-                text=optimization_note,
-                font=Theme.scaled_font(9, "bold"),
-                bootstyle="success",
-            )
-            lbl_opt.is_dynamic_wrap = True
-            lbl_opt.pack(anchor="w", pady=Theme.scaled_val(2))
-
-        advice = []
-        if stats["cast_t2"] < 50:
-            advice.append("• Add more 2-drops to improve early board presence.")
-
-        from src import constants
-
-        non_basics = [
-            c
-            for c in self.deck_list
-            if "Land" in c.get("types", [])
-            and "Basic" not in c.get("types", [])
-            and c.get("name") not in constants.BASIC_LANDS
-        ]
-        colorless_lands = [c for c in non_basics if not c.get("colors")]
-
-        if stats["color_screw_t3"] > 10.0:
-            if colorless_lands:
-                advice.append(
-                    f"• Color screw risk is elevated. Consider cutting a colorless utility land (like {colorless_lands[0].get('name', '')}) for a basic land."
-                )
-            else:
-                advice.append(
-                    "• High color screw risk. Consider cutting a splash card or adding more fixing."
-                )
-
-        # Ensure static advice does not contradict the AI Optimizer's recent actions
-        is_18_lands = optimization_note and "18 Lands" in optimization_note
-        is_16_lands = optimization_note and "16 Lands" in optimization_note
-
-        if stats["screw_t3"] > 22.0 and not is_16_lands:
-            advice.append(
-                "• Frequently missing land drops. Consider running an extra land."
-            )
-        if stats["flood_t5"] > 28.0 and not is_18_lands:
-            advice.append(
-                "• High flood risk. Consider cutting a land or adding mana sinks."
-            )
-        if stats["removal_t4"] < 45:
-            advice.append("• Low early interaction. Prioritize cheap removal.")
-
-        deck_colors = set()
-        for c in self.deck_list:
-            if "Land" not in c.get("types", []):
-                for col in c.get("colors", []):
-                    deck_colors.add(col)
-
-        if len(deck_colors) >= 3:
-            advice.append(
-                "⚠️ Mana Base: You are playing 3+ colors. This inherently increases your risk of color screw. Ensure you have at least 3-4 strong fixing sources."
-            )
-
-        # Swap Suggestions
-        if not optimization_note:
-            if stats["cast_t2"] < 50 or stats["flood_t5"] > 25:
-                expensive_cards = [
-                    c
-                    for c in self.deck_list
-                    if int(c.get("cmc", 0)) >= 5 and "Land" not in c.get("types", [])
-                ]
-                if expensive_cards:
-                    deck_spells = [
-                        c for c in self.deck_list if "Land" not in c.get("types", [])
-                    ]
-                    deck_colors_strict = (
-                        get_strict_colors(deck_spells)
-                        if deck_spells
-                        else ["W", "U", "B", "R", "G"]
-                    )
-
-                    worst_expensive = min(
-                        expensive_cards,
-                        key=lambda x: float(
-                            x.get("deck_colors", {})
-                            .get("All Decks", {})
-                            .get("gihwr", 0)
-                        ),
-                    )
-                    cheap_sb = [
-                        c
-                        for c in self.sb_list
-                        if int(c.get("cmc", 0)) <= 3
-                        and "Land" not in c.get("types", [])
-                        and "Creature" in c.get("types", [])
-                        and is_castable(c, deck_colors_strict, strict=True)
-                    ]
-                    if cheap_sb:
-                        best_cheap = max(
-                            cheap_sb,
-                            key=lambda x: float(
-                                x.get("deck_colors", {})
-                                .get("All Decks", {})
-                                .get("gihwr", 0)
-                            ),
-                        )
-                        advice.append(
-                            f"• Swap: Cut [{worst_expensive['name']}] for [{best_cheap['name']}] to lower curve."
-                        )
-
-        for tip in advice:
-            lbl_tip = ttk.Label(sim_frame, text=tip, font=Theme.scaled_font(9))
-            lbl_tip.is_dynamic_wrap = True
-            lbl_tip.pack(anchor="w", pady=Theme.scaled_val(2))
-
-            # Re-trigger a configure event on the parent container to format newly added labels instantly
-            sim_frame.event_generate("<Configure>")
-
-        sim_canvas = getattr(self, "sim_canvas", None)
-        if sim_canvas and sim_canvas.winfo_exists():
-            self.after(
-                50,
-                lambda: sim_canvas.configure(scrollregion=sim_canvas.bbox("all")),
-            )
 
     def _clear_sample_hand(self):
-        hand_container = getattr(self, "hand_container", None)
-        if hand_container and hand_container.winfo_exists():
-            for widget in hand_container.winfo_children():
-                widget.destroy()
-
-        if hasattr(self, "hand_images"):
-            self.hand_images.clear()
-        if hasattr(self, "hand_frames"):
-            self.hand_frames = []
+        clear_sample_hand(
+            getattr(self, "hand_container", None),
+            getattr(self, "hand_images", None),
+            getattr(self, "hand_frames", None),
+        )
 
     def _draw_sample_hand(self):
-        self._clear_sample_hand()
-
-        hand_container = getattr(self, "hand_container", None)
-        if not hand_container or not hand_container.winfo_exists():
-            return
-
-        if not self.deck_list:
-            ttk.Label(
-                hand_container,
-                text="Generate a deck first.",
-                font=Theme.scaled_font(11),
-            ).pack(pady=Theme.scaled_val(20))
-            return
-
-        flat_deck = []
-        for c in self.deck_list:
-            flat_deck.extend([c] * int(c.get("count", 1)))
-
-        if len(flat_deck) < 7:
-            ttk.Label(
-                hand_container,
-                text="Deck has fewer than 7 cards.",
-                font=Theme.scaled_font(11),
-            ).pack(pady=Theme.scaled_val(20))
-            return
-
-        # Draw 7 random cards
-        hand = random.sample(flat_deck, 7)
-
-        # Sort the hand: Basic Lands (WUBRG) -> Non-Basic Lands -> Spells (by CMC)
-        def hand_sort_key(c):
-            types = c.get("types", [])
-            name = c.get("name", "")
-            cmc = int(c.get("cmc", 0))
-            is_land = "Land" in types
-            is_basic = "Basic" in types or name in constants.BASIC_LANDS
-
-            if is_land:
-                if is_basic:
-                    color_order = 5
-                    if "Plains" in name:
-                        color_order = 0
-                    elif "Island" in name:
-                        color_order = 1
-                    elif "Swamp" in name:
-                        color_order = 2
-                    elif "Mountain" in name:
-                        color_order = 3
-                    elif "Forest" in name:
-                        color_order = 4
-                    return (0, color_order, name)
-                return (1, 0, name)
-            return (2, cmc, name)
-
-        hand.sort(key=hand_sort_key)
-
-        scale = Theme.current_scale
-        # Reduced size for scrollability and sleeker look
-        img_w = Theme.scaled_val(180)
-        img_h = Theme.scaled_val(252)
-        offset_y = Theme.scaled_val(32)
-
-        # Calculate exact height to allow scrolling perfectly
-        stack_h = img_h + (6 * offset_y) + 20
-
-        stack_container = ttk.Frame(hand_container, width=img_w, height=stack_h)
-        stack_container.pack(expand=True, pady=Theme.scaled_val(15))
-        stack_container.pack_propagate(False)
-
-        def restore_z_order(event=None):
-            if hasattr(self, "hand_frames"):
-                for f in self.hand_frames:
-                    if f.winfo_exists():
-                        f.lift()
-
-        for i, card in enumerate(hand):
-            frame = ttk.Frame(
-                stack_container, width=img_w, height=img_h, bootstyle="secondary"
-            )
-            frame.pack_propagate(False)
-            frame.place(x=0, y=i * offset_y)
-
-            self.hand_frames.append(frame)
-
-            # Temporary text label while image downloads
-            name_lbl = ttk.Label(
-                frame,
-                text=card.get("name", "Unknown"),
-                font=Theme.scaled_font(9),
-                wraplength=img_w - Theme.scaled_val(10),
-                justify="center",
-                bootstyle="inverse-secondary",
-            )
-            name_lbl.pack(expand=True)
-
-            # Bindings for the temporary label
-            name_lbl.bind("<Enter>", lambda e, f=frame: f.lift())
-            name_lbl.bind("<Leave>", restore_z_order)
-
-            # Dispatch to background thread
-            self.image_executor.submit(
-                self._fetch_and_show_image, card, frame, img_w, img_h
-            )
-
-    def _fetch_and_show_image(self, card, container_frame, width, height):
-        img_url = ""
-        urls = card.get("image", [])
-        if urls:
-            img_url = urls[0]
-        elif card.get("name") in constants.BASIC_LANDS:
-            # Fallback to Scryfall API for generated Basic Lands
-            img_url = f"https://api.scryfall.com/cards/named?exact={urllib.parse.quote(card.get('name'))}&format=image"
-
-        if not img_url:
-            return
-
-        if img_url.startswith("/static"):
-            img_url = f"https://www.17lands.com{img_url}"
-        elif "scryfall" in img_url and "format=image" not in img_url:
-            img_url = img_url.replace("/small/", "/large/").replace(
-                "/normal/", "/large/"
-            )
-
-        cache_dir = os.path.join(constants.TEMP_FOLDER, "Images")
-        os.makedirs(cache_dir, exist_ok=True)
-
-        safe_name = hashlib.md5(img_url.encode("utf-8")).hexdigest() + ".jpg"
-        cache_path = os.path.join(cache_dir, safe_name)
-
-        try:
-            # Load from cache or download
-            if os.path.exists(cache_path):
-                with open(cache_path, "rb") as f:
-                    img_data = f.read()
-            else:
-                r = requests.get(
-                    img_url, headers={"User-Agent": "MTGADraftTool/5.0"}, timeout=8
-                )
-                r.raise_for_status()
-                img_data = r.content
-                with open(cache_path, "wb") as f:
-                    f.write(img_data)
-
-            img = Image.open(io.BytesIO(img_data))
-            img.thumbnail((width, height), Image.Resampling.LANCZOS)
-
-            def apply_img():
-                if container_frame.winfo_exists():
-                    for w in container_frame.winfo_children():
-                        w.destroy()
-
-                    tk_img = ImageTk.PhotoImage(img)
-                    self.hand_images.append(tk_img)
-                    lbl = ttk.Label(container_frame, image=tk_img, cursor="hand2")
-                    lbl.pack(fill="both", expand=True)
-
-                    scale = constants.UI_SIZE_DICT.get(
-                        self.configuration.settings.ui_size, 1.0
-                    )
-                    lbl.bind(
-                        "<Button-1>",
-                        lambda e, c=card: CardToolTip.create(
-                            container_frame,
-                            c,
-                            self.configuration.features.images_enabled,
-                            scale,
-                        ),
-                    )
-
-                    def restore_z(event=None):
-                        if hasattr(self, "hand_frames"):
-                            for f in self.hand_frames:
-                                if f.winfo_exists():
-                                    f.lift()
-
-                    lbl.bind("<Enter>", lambda e: container_frame.lift())
-                    lbl.bind("<Leave>", restore_z)
-
-            # Safely sync to main UI thread
-            self.after(0, apply_img)
-
-        except Exception:
-            pass
+        draw_sample_hand(
+            getattr(self, "hand_container", None),
+            self.deck_list,
+            self.hand_images,
+            self.hand_frames,
+            self.configuration,
+            self.after,
+        )
 
     # --- BASIC LAND HANDLERS ---
     def _on_basic_remove(self, event, color_name):
@@ -1354,60 +945,17 @@ class CustomDeckPanel(ttk.Frame):
             )
 
             for idx, card in enumerate(sorted_source):
-                row_values = []
-                for field in manager.active_fields:
-                    if field == "name":
-                        row_values.append(card.get("name", "Unknown"))
-                    elif field == "count":
-                        row_values.append(str(card.get("count", 1)))
-                    elif field == "cmc":
-                        row_values.append(str(card.get("cmc", 0)))
-                    elif field == "types":
-                        row_values.append(format_types_for_ui(card.get("types", [])))
-                    elif field == "mana_cost":
-                        row_values.append(card.get("mana_cost", ""))
-                    elif field == "colors":
-                        row_values.append("".join(card.get("colors", [])))
-                    elif field == "tags":
-                        raw_tags = card.get("tags", [])
-                        if raw_tags:
-                            icons = [
-                                constants.TAG_VISUALS.get(t, t).split(" ")[0]
-                                for t in raw_tags
-                            ]
-                            row_values.append(" ".join(icons))
-                        else:
-                            row_values.append("-")
-                    elif "TIER" in field:
-                        if tier_data and field in tier_data:
-                            tier_obj = tier_data[field]
-                            raw_name = card.get("name", "")
-                            if raw_name in tier_obj.ratings:
-                                row_values.append(tier_obj.ratings[raw_name].rating)
-                            else:
-                                row_values.append("NA")
-                        else:
-                            row_values.append("NA")
-                    else:
-                        stats = card.get("deck_colors", {}).get(
-                            active_filter,
-                            card.get("deck_colors", {}).get("All Decks", {}),
-                        )
-                        val = stats.get(field, 0.0)
-                        row_values.append(
-                            format_win_rate(
-                                val,
-                                active_filter,
-                                field,
-                                metrics,
-                                self.configuration.settings.result_format,
-                            )
-                        )
-
-                tag = "bw_odd" if idx % 2 == 0 else "bw_even"
-                if self.configuration.settings.card_colors_enabled:
-                    tag = row_color_tag(card.get(constants.DATA_FIELD_MANA_COST, ""))
-
+                row_values = DynamicTreeviewManager.format_row_values(
+                    card,
+                    manager.active_fields,
+                    active_filter=active_filter,
+                    metrics=metrics,
+                    result_format=self.configuration.settings.result_format,
+                    tier_data=tier_data,
+                )
+                tag = DynamicTreeviewManager.get_row_tag(
+                    card, idx, self.configuration.settings.card_colors_enabled
+                )
                 tree.insert(
                     "",
                     "end",
@@ -1424,171 +972,11 @@ class CustomDeckPanel(ttk.Frame):
         populate_tree(self.sb_manager, self.sb_list, True)
 
     def _render_deck_stats(self):
-        for widget in self.stats_frame.winfo_children():
-            widget.destroy()
-
-        if not self.deck_list:
-            return
-
-        total_cards = sum(c.get("count", 1) for c in self.deck_list)
-        creatures = sum(
-            c.get("count", 1)
-            for c in self.deck_list
-            if "Creature" in c.get("types", [])
+        render_deck_stats(
+            getattr(self, "stats_frame", None),
+            self.deck_list,
+            show_subtypes=True,
         )
-        lands = sum(
-            c.get("count", 1) for c in self.deck_list if "Land" in c.get("types", [])
-        )
-        spells = total_cards - creatures - lands
-
-        pips = {"W": 0, "U": 0, "B": 0, "R": 0, "G": 0}
-        curve = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
-        tags = {}
-        cmc_sum = 0
-        non_lands = 0
-
-        supertypes = {
-            "Creature",
-            "Instant",
-            "Sorcery",
-            "Enchantment",
-            "Artifact",
-            "Planeswalker",
-            "Land",
-            "Legendary",
-            "Basic",
-            "Snow",
-            "World",
-            "Tribal",
-            "Kindred",
-            "Ongoing",
-        }
-        subtypes = {}
-
-        for c in self.deck_list:
-            count = c.get("count", 1)
-            if "Land" not in c.get("types", []):
-                non_lands += count
-                cmc = get_functional_cmc(c)
-                cmc_sum += cmc * count
-                idx = min(cmc, 6)
-                if idx == 0:
-                    idx = 1
-                curve[idx] += count
-
-                cost = c.get("mana_cost", "")
-                for symbol in "WUBRG":
-                    pips[symbol] += cost.count(symbol) * count
-
-                for t in c.get("tags", []):
-                    tags[t] = tags.get(t, 0) + count
-
-            if "Creature" in c.get("types", []):
-                for t in c.get("types", []):
-                    if t not in supertypes:
-                        subtypes[t] = subtypes.get(t, 0) + count
-
-        avg_cmc = cmc_sum / non_lands if non_lands else 0
-        top_tribes = sorted(subtypes.items(), key=lambda x: x[1], reverse=True)[:5]
-
-        comp_frame = ttk.Frame(self.stats_frame)
-        comp_frame.pack(fill="x", pady=Theme.scaled_val(5))
-        ttk.Label(
-            comp_frame,
-            text="DECK COMPOSITION",
-            font=Theme.scaled_font(10, "bold"),
-            bootstyle="primary",
-        ).pack(anchor="w")
-        ttk.Label(
-            comp_frame,
-            text=f"Total Cards: {total_cards}  |  Creatures: {creatures}  |  Non-Creatures: {spells}  |  Lands: {lands}",
-        ).pack(anchor="w", pady=Theme.scaled_val(2))
-
-        ttk.Separator(self.stats_frame, orient="horizontal").pack(
-            fill="x", pady=Theme.scaled_val(8)
-        )
-
-        color_frame = ttk.Frame(self.stats_frame)
-        color_frame.pack(fill="x", pady=Theme.scaled_val(5))
-        ttk.Label(
-            color_frame,
-            text="COLOR REQUIREMENTS (PIPS)",
-            font=Theme.scaled_font(10, "bold"),
-            bootstyle="primary",
-        ).pack(anchor="w")
-
-        pip_str = []
-        for symbol, name, color in [
-            ("W", "White", Theme.TEXT_MUTED),
-            ("U", "Blue", Theme.ACCENT),
-            ("B", "Black", "#8b8b93"),
-            ("R", "Red", Theme.ERROR),
-            ("G", "Green", Theme.SUCCESS),
-        ]:
-            if pips[symbol] > 0:
-                pip_str.append(f"{name} ({symbol}): {pips[symbol]}")
-        ttk.Label(
-            color_frame, text="  |  ".join(pip_str) if pip_str else "Colorless"
-        ).pack(anchor="w", pady=Theme.scaled_val(2))
-
-        ttk.Separator(self.stats_frame, orient="horizontal").pack(
-            fill="x", pady=Theme.scaled_val(8)
-        )
-
-        tags_frame = ttk.Frame(self.stats_frame)
-        tags_frame.pack(fill="x", pady=Theme.scaled_val(5))
-        ttk.Label(
-            tags_frame,
-            text="ROLES & SYNERGIES",
-            font=Theme.scaled_font(10, "bold"),
-            bootstyle="primary",
-        ).pack(anchor="w")
-
-        if tags:
-            tag_str = []
-            for tag_key, count in sorted(
-                tags.items(), key=lambda item: item[1], reverse=True
-            ):
-                ui_name = constants.TAG_VISUALS.get(tag_key, tag_key.capitalize())
-                tag_str.append(f"{ui_name}: {count}")
-
-            for i in range(0, len(tag_str), 4):
-                ttk.Label(tags_frame, text="    ".join(tag_str[i : i + 4])).pack(
-                    anchor="w", pady=Theme.scaled_val(2)
-                )
-        else:
-            ttk.Label(
-                tags_frame,
-                text="No Scryfall tags found for this set.",
-                bootstyle="secondary",
-            ).pack(anchor="w", pady=Theme.scaled_val(2))
-
-        if top_tribes:
-            tribe_str = "  |  ".join([f"{t}: {c}" for t, c in top_tribes])
-            ttk.Label(
-                tags_frame, text=f"Top Tribes: {tribe_str}", font=Theme.scaled_font(9)
-            ).pack(anchor="w", pady=Theme.scaled_val(4))
-
-        ttk.Separator(self.stats_frame, orient="horizontal").pack(
-            fill="x", pady=Theme.scaled_val(8)
-        )
-
-        curve_frame = ttk.Frame(self.stats_frame)
-        curve_frame.pack(fill="x", pady=Theme.scaled_val(5))
-        ttk.Label(
-            curve_frame,
-            text=f"MANA CURVE (Avg CMC: {avg_cmc:.2f})",
-            font=Theme.scaled_font(10, "bold"),
-            bootstyle="primary",
-        ).pack(anchor="w")
-        for i in range(1, 7):
-            lbl = f"{i} CMC: " if i < 6 else "6+ CMC:"
-            cnt = curve[i]
-            ttk.Label(
-                curve_frame,
-                text=f"{lbl:<8} {'█' * cnt} ({cnt})",
-                font=Theme.scaled_font(10, family=constants.FONT_MONO_SPACE),
-            ).pack(anchor="w", pady=Theme.scaled_val(1))
 
     def _copy_to_clipboard(self):
         self.clipboard_clear()

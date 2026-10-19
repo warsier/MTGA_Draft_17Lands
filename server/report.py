@@ -98,15 +98,22 @@ class PipelineReport:
             }
         )
 
-    def record_skipped(self, set_code: str, draft_format: Optional[str], reason: str):
+    def record_skipped(
+        self,
+        set_code: str,
+        draft_format: Optional[str],
+        reason: str,
+        user_group: Optional[str] = None,
+    ):
         """Records a dataset that was intentionally skipped or failed gracefully."""
-        self._skipped.append(
-            {
-                "set": set_code,
-                "format": draft_format,
-                "reason": reason,
-            }
-        )
+        entry = {
+            "set": set_code,
+            "format": draft_format,
+            "reason": reason,
+        }
+        if user_group is not None:
+            entry["user_group"] = user_group
+        self._skipped.append(entry)
 
     def record_warehouse_state(self, manifest: dict):
         """Records the final state of the manifest (all available historical data)."""

@@ -8,6 +8,11 @@ from server.extract import (
 from server import config
 
 
+@pytest.fixture(autouse=True)
+def isolate_scryfall_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr("server.extract.SCRYFALL_CACHE_DIR", str(tmp_path))
+
+
 @pytest.fixture
 def mock_client():
     return MagicMock()

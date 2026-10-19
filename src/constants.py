@@ -918,13 +918,31 @@ FIXING_NAMES = [
 
 DATA_FIELD_TAGS = "tags"
 
+# Master definition of all 14 community Oracle tags harvested from Scryfall
+SCRYFALL_TAG_QUERIES = {
+    "removal": "otag:removal OR otag:board-wipe OR otag:burn OR otag:counterspell OR otag:pacifism OR otag:edict OR otag:destroy OR otag:exile",
+    "combat_trick": "otag:combat-trick OR otag:pump-spell OR otag:protection-spell",
+    "enhancement": "otag:aura OR otag:equipment OR otag:vehicle",
+    "fixing_ramp": "otag:mana-fixing OR otag:fetchland OR otag:mana-dork OR otag:treasure OR otag:ramp OR otag:mana-rock",
+    "card_advantage": "otag:card-draw OR otag:card-selection OR otag:recursion OR otag:tutor OR otag:cantrip OR kw:investigate OR kw:surveil",
+    "evasion": "otag:evasion OR kw:flying OR kw:menace OR kw:trample OR kw:unblockable OR kw:skulk OR kw:shadow",
+    "mana_sink": "otag:mana-sink OR kw:kicker OR kw:multikicker OR kw:adapt",
+    "token_maker": "otag:token-generator OR kw:amass OR kw:incubate",
+    "lifegain": "otag:lifegain OR kw:lifelink",
+    "protection": "otag:hexproof-granter OR otag:indestructible-granter OR otag:blink OR otag:flicker OR otag:ward-granter",
+    "hate": "otag:graveyard-hate OR otag:artifact-destruction OR otag:enchantment-destruction",
+    "synergy_artifacts": "otag:artifact-synergy OR otag:cares-about-artifacts",
+    "synergy_graveyard": "otag:graveyard-synergy OR otag:cares-about-graveyard",
+    "synergy_counters": "otag:counters-synergy OR otag:cares-about-counters",
+}
+
 # Map internal Scryfall tags to UI-friendly icons and labels
 TAG_VISUALS = {
     "removal": "🎯 Removal",
     "evasion": "🦅 Evasion",
     "card_advantage": "📚 Advantage",
-    "fixing_ramp": "🌈 Fixing",  # Changed from 🌱 Mana/Fix
-    "fixing": "🌈 Fixing",  # Catch-all in case the internal tag was renamed
+    "fixing_ramp": "🌈 Fixing",
+    "fixing": "🌈 Fixing",
     "combat_trick": "⚔️ Trick",
     "enhancement": "🛡️ Enhance",
     "token_maker": "👯 Tokens",
@@ -932,6 +950,9 @@ TAG_VISUALS = {
     "mana_sink": "⚙️ Sink",
     "protection": "🛡️ Protect",
     "hate": "🚫 Hate",
+    "synergy_artifacts": "⚙️ Artifacts",
+    "synergy_graveyard": "🪦 Graveyard",
+    "synergy_counters": "➕ Counters",
 }
 
 # Known corrupted mappings returned by 17Lands API
@@ -942,5 +963,5 @@ CARD_NAME_CORRECTIONS = {
 }
 
 # --- Remote ETL Pipeline ---
-REMOTE_MANIFEST_URL = "https://unrealities.github.io/MTGA_Draft_17Lands/manifest.json"
-REMOTE_DATASET_BASE_URL = "https://unrealities.github.io/MTGA_Draft_17Lands/"
+REMOTE_MANIFEST_URL = "https://warsier.github.io/MTGA_Draft_17Lands/manifest.json"
+REMOTE_DATASET_BASE_URL = "https://warsier.github.io/MTGA_Draft_17Lands/"

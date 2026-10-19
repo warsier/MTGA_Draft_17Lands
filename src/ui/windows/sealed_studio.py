@@ -852,52 +852,20 @@ class SealedStudioWindow(tb.Toplevel):
 
         card_list.sort(key=lambda x: (x.get("cmc", 0), x.get("name", "")))
 
-        from src.card_logic import format_win_rate, row_color_tag, format_types_for_ui
-
         active_filter = "All Decks"
+        tier_data = getattr(self.draft, "tier_data", None) if hasattr(self, "draft") else None
 
         for idx, card in enumerate(card_list):
-            row_values = []
-            for field in manager.active_fields:
-                if field == "name":
-                    row_values.append(card.get("name", "Unknown"))
-                elif field == "count":
-                    row_values.append(str(card.get("count", 1)))
-                elif field == "cmc":
-                    row_values.append(str(card.get("cmc", 0)))
-                elif field == "types":
-                    row_values.append(format_types_for_ui(card.get("types", [])))
-                elif field == "colors":
-                    row_values.append("".join(card.get("colors", [])))
-                elif field == "tags":
-                    raw_tags = card.get("tags", [])
-                    row_values.append(
-                        " ".join(
-                            [
-                                constants.TAG_VISUALS.get(t, t).split(" ")[0]
-                                for t in raw_tags
-                            ]
-                        )
-                        if raw_tags
-                        else "-"
-                    )
-                else:
-                    stats = card.get("deck_colors", {}).get(active_filter, {})
-                    val = stats.get(field, 0.0)
-                    row_values.append(
-                        format_win_rate(
-                            val,
-                            active_filter,
-                            field,
-                            self.metrics,
-                            self.configuration.settings.result_format,
-                        )
-                    )
-
-            tag = (
-                row_color_tag(card.get("mana_cost", ""))
-                if self.configuration.settings.card_colors_enabled
-                else ("bw_odd" if idx % 2 == 0 else "bw_even")
+            row_values = DynamicTreeviewManager.format_row_values(
+                card,
+                manager.active_fields,
+                active_filter=active_filter,
+                metrics=self.metrics,
+                result_format=self.configuration.settings.result_format,
+                tier_data=tier_data,
+            )
+            tag = DynamicTreeviewManager.get_row_tag(
+                card, idx, self.configuration.settings.card_colors_enabled
             )
             tree.insert(
                 "",

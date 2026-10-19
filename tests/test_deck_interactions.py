@@ -23,7 +23,7 @@ class TestDeckInteractions:
     def mock_app_context(self):
         draft_manager = MagicMock()
         draft_manager.retrieve_taken_cards.return_value = [
-            {"name": "Test Card", "count": 2, "types": ["Creature"]}
+            {"name": "Test Card", "count": 1, "types": ["Creature"]}
         ]
         return draft_manager
 

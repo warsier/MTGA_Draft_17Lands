@@ -227,6 +227,19 @@ def is_castable(card, colors, strict=True):
 
 
 class ManaSourceAnalyzer:
+    SPECIFIC_FIXING_MAP = {
+        "plainscycling": "W",
+        "search your library for a plains": "W",
+        "islandcycling": "U",
+        "search your library for an island": "U",
+        "swampcycling": "B",
+        "search your library for a swamp": "B",
+        "mountaincycling": "R",
+        "search your library for a mountain": "R",
+        "forestcycling": "G",
+        "search your library for a forest": "G",
+    }
+
     def __init__(self, pool):
         self.pool = pool
         self.sources = {c: 0 for c in constants.CARD_COLORS}
@@ -256,25 +269,15 @@ class ManaSourceAnalyzer:
         )
         card_colors, is_land = card.get("colors", []), "Land" in types
 
-        specific_fixing_map = {
-            "plainscycling": "W",
-            "search your library for a plains": "W",
-            "islandcycling": "U",
-            "search your library for an island": "U",
-            "swampcycling": "B",
-            "search your library for a swamp": "B",
-            "mountaincycling": "R",
-            "search your library for a mountain": "R",
-            "forestcycling": "G",
-            "search your library for a forest": "G",
-        }
-
         specific_match_found = False
-        for phrase, color_sym in specific_fixing_map.items():
+        for phrase, color_sym in self.SPECIFIC_FIXING_MAP.items():
             if phrase in text:
                 self.sources[color_sym] += count
                 self.total_fixing_cards += count
                 specific_match_found = True
+
+        if is_land and specific_match_found:
+            return
 
         is_universal = any(
             phrase in text for phrase in constants.FIXING_KEYWORDS
@@ -428,14 +431,14 @@ def brute_force_mana_base(spells, non_basic_lands, colors, forced_count=17):
         if col in base_counts:
             base_counts[col] += 1
 
-    # 2. Generate Neighborhood Permutations (+/- 2 lands per color)
-    tolerance = 2
-    ranges = []
-
     # Only test permutations for colors we actually want to cast
     active_colors = [c for c in colors if base_counts.get(c, 0) > 0]
     if not active_colors:
         return baseline_basics
+
+    # 2. Generate Neighborhood Permutations (+/- 2 lands, capped at +/- 1 for 4+ colors)
+    tolerance = 1 if len(active_colors) >= 4 else 2
+    ranges = []
 
     for c in active_colors:
         base = base_counts[c]

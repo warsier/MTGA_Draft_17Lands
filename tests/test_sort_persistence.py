@@ -257,6 +257,15 @@ class TestReapplySort:
 
         assert get_col_values(overlay_tree, 1)[0] == "80.0"
 
+    def test_reapply_sort_does_not_persist_to_disk(self, root):
+        """reapply_sort() must NOT invoke write_configuration (disk I/O)."""
+        config = make_config(sort_states={"pack": {"column": "gihwr", "reverse": True}})
+        tree = make_tree(root, view_id="pack_table", config=config)
+        tree.insert("", "end", values=("Card A", "40.0", "50"))
+        with patch(WRITE_CFG) as mock_write:
+            tree.reapply_sort()
+            mock_write.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # force_reverse parameter

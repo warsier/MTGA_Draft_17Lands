@@ -6,6 +6,7 @@ Supports both List View (Table) and Visual View (Mana Curve Stacks).
 
 import tkinter
 from tkinter import ttk
+import ttkbootstrap as tb
 from typing import List, Dict, Any
 
 from src import constants
@@ -113,7 +114,7 @@ class TakenCardsPanel(ttk.Frame):
         type_grp = ttk.Frame(self.filter_frame, style="Card.TFrame")
         type_grp.pack(side="left", padx=Theme.scaled_val(5))
 
-        self.lbl_filter = ttk.Label(
+        self.lbl_filter = tb.Label(
             type_grp,
             text="FILTER:",
             font=Theme.scaled_font(8, "bold"),
@@ -159,7 +160,7 @@ class TakenCardsPanel(ttk.Frame):
         btn_frame = ttk.Frame(self.filter_frame, style="Card.TFrame")
         btn_frame.pack(side="right")
 
-        self.btn_view = ttk.Button(
+        self.btn_view = tb.Button(
             btn_frame,
             text="Switch to Visual View",
             command=self._toggle_view,
@@ -167,7 +168,7 @@ class TakenCardsPanel(ttk.Frame):
         )
         self.btn_view.pack(side="left", padx=Theme.scaled_val(5))
 
-        self.btn_export = ttk.Button(
+        self.btn_export = tb.Button(
             btn_frame, text="Export Pool", command=self._copy_to_clipboard
         )
         self.btn_export.pack(side="left", padx=Theme.scaled_val(5))

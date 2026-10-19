@@ -5,6 +5,7 @@ import hashlib
 import logging
 import shutil
 from server import config
+from src.dataset_manifest import validate_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def save_dataset(set_code, draft_format, user_group, dataset) -> dict:
     filename = f"{set_code}_{draft_format}_{user_group}_Data.json.gz"
     filepath = os.path.join(config.OUTPUT_DIR, filename)
 
-    json_str = json.dumps(dataset, separators=(",", ":"))
+    json_str = json.dumps(dataset, separators=(",", ":"), allow_nan=False)
 
     internal_name = filename.replace(".gz", "")
 
@@ -57,11 +58,13 @@ def save_dataset(set_code, draft_format, user_group, dataset) -> dict:
 
 def save_manifest(manifest_data):
     ensure_output_dir()
+    if isinstance(manifest_data, dict) and "datasets" in manifest_data:
+        validate_manifest(manifest_data)
     filepath = os.path.join(config.OUTPUT_DIR, "manifest.json")
 
     def _write_json(tmp_path):
         with open(tmp_path, "w") as f:
-            json.dump(manifest_data, f, indent=2)
+            json.dump(manifest_data, f, indent=2, allow_nan=False)
 
     atomic_write(filepath, _write_json)
     logger.info("Manifest saved successfully.")
@@ -73,7 +76,7 @@ def save_report(report_data: dict):
 
     def _write_json(tmp_path):
         with open(tmp_path, "w") as f:
-            json.dump(report_data, f, indent=2)
+            json.dump(report_data, f, indent=2, allow_nan=False)
 
     atomic_write(filepath, _write_json)
     logger.info(f"Run report saved → {filepath}")
@@ -85,7 +88,7 @@ def save_calendar(calendar):
 
     def _write_json(tmp_path):
         with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(calendar, f, indent=2)
+            json.dump(calendar, f, indent=2, allow_nan=False)
 
     atomic_write(filepath, _write_json)
 

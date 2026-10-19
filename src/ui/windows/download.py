@@ -3,6 +3,7 @@ import threading
 import os
 import json
 from tkinter import ttk, messagebox
+import ttkbootstrap as tb
 from datetime import date
 from typing import Optional
 from dataclasses import dataclass
@@ -229,7 +230,7 @@ class DownloadWindow(ttk.Frame):
             row=3, column=0, columnspan=4, pady=Theme.scaled_val((10, 0)), sticky="ew"
         )
 
-        self.btn_clear = ttk.Button(
+        self.btn_clear = tb.Button(
             form,
             text="Clear Inactive Datasets",
             command=self._clear_inactive_datasets,
@@ -239,7 +240,7 @@ class DownloadWindow(ttk.Frame):
             row=4, column=0, columnspan=4, pady=Theme.scaled_val((5, 0)), sticky="ew"
         )
 
-        ttk.Button(
+        tb.Button(
             form,
             text="Reset Dataset Cache",
             command=self._clear_set_history,
@@ -248,7 +249,7 @@ class DownloadWindow(ttk.Frame):
             row=5, column=0, columnspan=4, pady=Theme.scaled_val((5, 0)), sticky="ew"
         )
 
-        ttk.Button(
+        tb.Button(
             form,
             text="Restore Deleted Datasets",
             command=self._restore_deleted_datasets,
@@ -261,7 +262,7 @@ class DownloadWindow(ttk.Frame):
         self.progress.pack(fill="x", pady=Theme.scaled_val(5))
 
         self.vars["status"] = tkinter.StringVar(value="Ready")
-        ttk.Label(
+        tb.Label(
             container, textvariable=self.vars["status"], bootstyle="secondary"
         ).pack()
 

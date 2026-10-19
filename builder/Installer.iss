@@ -6,12 +6,12 @@ WizardStyle=modern
 DefaultDirName={sd}\MtgaDraftTool
 DefaultGroupName=MtgaDraftTool
 LicenseFile=..\LICENSE
-UninstallDisplayIcon={app}\MtgaDraftTool.exe
+UninstallDisplayIcon={app}\MTGA_Draft_Tool.exe
 Compression=lzma2
 UsePreviousAppDir=yes
 SolidCompression=yes
 OutputDir={app}
-OutputBaseFilename=MTGA_Draft_Tool_V0424
+OutputBaseFilename=MTGA_Draft_Tool_V0424_homebrew
 InfoAfterFile=..\release_notes.txt
 [Files]
 Source: "..\dist\MTGA_Draft_Tool.exe"; DestDir: "{app}"

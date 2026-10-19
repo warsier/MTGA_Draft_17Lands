@@ -128,17 +128,54 @@ class SetMetrics:
     def generate_metrics(self, dataset: Dataset) -> None:
         """
         Calculate the mean and standard deviation for all of the supported colors and win rate fields
+        in a single fast pass over the dataset.
         """
         if not dataset:
             return
 
-        # Iterate over the supported colors and generate the metrics for each color
+        dataset_dict = dataset.get_card_ratings()
+        if not dataset_dict:
+            return
+
+        values_by_field_color = {
+            field: {color: [] for color in DECK_COLORS}
+            for field in WIN_RATE_OPTIONS
+        }
+
+        from src.utils import normalize_color_string
+
+        processed_cards = set()
+        for card_data in dataset_dict.values():
+            card_name = card_data.get(DATA_FIELD_NAME)
+            if not card_name or card_name in processed_cards:
+                continue
+            processed_cards.add(card_name)
+
+            deck_stats = card_data.get(DATA_FIELD_DECK_COLORS, {})
+            if not deck_stats:
+                continue
+
+            for color in DECK_COLORS:
+                std_color = normalize_color_string(color)
+                color_stats = deck_stats.get(std_color)
+                if not color_stats:
+                    continue
+
+                for field in WIN_RATE_OPTIONS:
+                    val = color_stats.get(field)
+                    if val is not None and val != 0.0:
+                        values_by_field_color[field][color].append(round(val, self._digits))
+
         for field in WIN_RATE_OPTIONS:
             self._color_metrics[field] = {}
             for color in DECK_COLORS:
-                self._color_metrics[field][color] = self.generate_color_metrics(
-                    color, field, dataset
-                )
+                metrics = ColorMetrics()
+                vals = values_by_field_color[field][color]
+                if vals:
+                    metrics.count = len(vals)
+                    metrics.mean = stats.mean(vals)
+                    metrics.std = stats.pstdev(vals)
+                self._color_metrics[field][color] = metrics
 
     def generate_color_metrics(
         self, color: str, field: str, dataset: Dataset

@@ -10,6 +10,7 @@ import glob
 import re
 import sqlite3
 import tempfile
+import requests
 from typing import Dict
 from src import constants
 from src.logger import create_logger
@@ -443,6 +444,15 @@ class FileExtractor(UIProgress):
                 user_group=self.user_group,
                 progress_callback=update_ui,
             )
+        except requests.HTTPError as e:
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            if status_code in (400, 404):
+                logger.warning(
+                    f"17Lands API returned {e}. Proceeding with local card data only."
+                )
+                deep_ratings = {}
+            else:
+                return False, f"Network Error: {str(e)}", 0
         except Exception as e:
             if "404" in str(e) or "400" in str(e):
                 logger.warning(
@@ -866,7 +876,7 @@ class FileExtractor(UIProgress):
                     result = True
                 except Exception as error:
                     logger.error(f"Card Read Error: {error}, {card}")
-                    break
+                    continue
         except Exception as error:
             logger.error(error)
 
@@ -956,12 +966,12 @@ class FileExtractor(UIProgress):
                                 ):
                                     card_data[card_set][group_id][
                                         constants.DATA_FIELD_CMC
-                                    ] = card_data[card_set][group_id][
+                                    ] = card_data[card_set][linked_id][
                                         constants.DATA_FIELD_CMC
                                     ]
                                     card_data[card_set][group_id][
                                         constants.DATA_FIELD_MANA_COST
-                                    ] = card_data[card_set][group_id][
+                                    ] = card_data[card_set][linked_id][
                                         constants.DATA_FIELD_MANA_COST
                                     ]
 
@@ -974,6 +984,7 @@ class FileExtractor(UIProgress):
         card_text = {}
         card_enumerators = {}
         card_data = {}
+        connection = None
         try:
             # Open Sqlite3 database
             while True:
@@ -1024,7 +1035,8 @@ class FileExtractor(UIProgress):
             logger.error(error)
 
         finally:
-            connection.close()
+            if connection is not None:
+                connection.close()
 
         return result, card_text, card_enumerators, card_data
 
@@ -1078,6 +1090,11 @@ class FileExtractor(UIProgress):
         """Creates a temporary card data file from data collected from local Arena files"""
         result = False
         try:
+            type_enum = card_enumerators.get(constants.DATA_FIELD_TYPES, {})
+            type_enum_str = {str(k): v for k, v in type_enum.items()}
+            sub_enum = card_enumerators.get("subtypes", {})
+            sub_enum_str = {str(k): v for k, v in sub_enum.items()}
+
             for card_set in card_data:
                 for card in card_data[card_set]:
                     try:
@@ -1094,9 +1111,6 @@ class FileExtractor(UIProgress):
 
                         # 2. MAP CARD TYPES
                         mapped_types = []
-                        type_enum = card_enumerators.get(constants.DATA_FIELD_TYPES, {})
-                        type_enum_str = {str(k): v for k, v in type_enum.items()}
-
                         for x in card_data[card_set][card].get(
                             constants.DATA_FIELD_TYPES, []
                         ):
@@ -1118,9 +1132,6 @@ class FileExtractor(UIProgress):
 
                         # 3. MAP SUBTYPES (Tribes like Ninja, Turtle, Human)
                         mapped_subs = []
-                        sub_enum = card_enumerators.get("subtypes", {})
-                        sub_enum_str = {str(k): v for k, v in sub_enum.items()}
-
                         for x in card_data[card_set][card].get("subtypes", []):
                             x_str = str(x)
                             if x_str in sub_enum_str:

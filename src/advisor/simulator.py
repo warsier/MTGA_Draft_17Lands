@@ -20,6 +20,8 @@ MAX_PIPS = 8  # colored pips tracked per card (more only occurs on 8+ drops)
 MAX_SOURCES = 16  # lands + ramp seen by turn 4 is at most 7 + 3 = 10
 
 PIP_PATTERN = re.compile(r"\{(.*?)\}")
+ANY_COLOR_RE = re.compile(r"\bany (?:one |combination of )?colors?\b")
+ADD_CLAUSE_RE = re.compile(r"\badd\b([^.;\n]*)")
 
 
 class DeckArrays(NamedTuple):
@@ -96,7 +98,7 @@ def _parse_deck_to_arrays(deck_list):
         types = c.get("types", [])
         tags = c.get("tags", [])
         text = str(c.get("oracle_text", c.get("text", ""))).lower()
-        any_color = re.search(r"\bany (?:one |combination of )?colors?\b", text) is not None
+        any_color = ANY_COLOR_RE.search(text) is not None
 
         is_land[i] = "Land" in types
         is_ramp[i] = (
@@ -111,7 +113,7 @@ def _parse_deck_to_arrays(deck_list):
             else:
                 # Read production clauses, excluding symbols in activation costs.
                 symbols = []
-                for clause in re.findall(r"\badd\b([^.;\n]*)", text):
+                for clause in ADD_CLAUSE_RE.findall(text):
                     symbols.extend(PIP_PATTERN.findall(clause))
                 mask = 0
                 if symbols:
@@ -140,7 +142,7 @@ def _parse_deck_to_arrays(deck_list):
     )
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _fill_cover(src_masks, n_src, cover):
     """cover[u] = number of sources able to produce at least one color in u."""
     for u in range(32):
@@ -152,7 +154,7 @@ def _fill_cover(src_masks, n_src, cover):
                 cover[u] += 1
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _can_pay(card, pips, pip_count, generic, n_src, cover):
     """
     True if the card's cost can be paid by n_src distinct mana sources.
@@ -178,7 +180,7 @@ def _can_pay(card, pips, pip_count, generic, n_src, cover):
     return True
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _collect_sources(
     deck_indices,
     start,
@@ -244,7 +246,7 @@ def _collect_sources(
     return n, usable
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _castable_on_turn(
     deck_indices,
     start,
@@ -303,7 +305,7 @@ def _castable_on_turn(
     return True, False
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _run_fast_monte_carlo(
     is_land,
     is_ramp,
@@ -336,13 +338,17 @@ def _run_fast_monte_carlo(
         np.random.shuffle(deck_indices)
 
         mull_count = 0
-        hand_idx = deck_indices[0:7]
-        lands_in_hand = np.sum(is_land[hand_idx])
+        lands_in_hand = 0
+        for j in range(7):
+            if is_land[deck_indices[j]]:
+                lands_in_hand += 1
 
         if lands_in_hand < 2 or lands_in_hand > 5:
             mull_count = 1
-            hand_idx = deck_indices[7:14]
-            lands_in_hand = np.sum(is_land[hand_idx])
+            lands_in_hand = 0
+            for j in range(7, 14):
+                if is_land[deck_indices[j]]:
+                    lands_in_hand += 1
             if lands_in_hand < 2 or lands_in_hand > 4:
                 mull_count = 2
 
@@ -354,19 +360,31 @@ def _run_fast_monte_carlo(
         start_ptr = mull_count * 7
 
         # Turn 3 & 4 & 5 States (on the play: one draw per turn from turn 2)
-        t3_idx = deck_indices[start_ptr : start_ptr + kept_size + 2]
-        t3_lands = np.sum(is_land[t3_idx])
+        end_t3 = start_ptr + kept_size + 2
+        t3_lands = 0
+        for j in range(start_ptr, end_t3):
+            if is_land[deck_indices[j]]:
+                t3_lands += 1
         if t3_lands < 3:
             screw_t3 += 1
 
-        t4_idx = deck_indices[start_ptr : start_ptr + kept_size + 3]
-        if np.sum(is_land[t4_idx]) < 4:
+        end_t4 = end_t3 + 1
+        t4_lands = t3_lands
+        if is_land[deck_indices[end_t3]]:
+            t4_lands += 1
+        if t4_lands < 4:
             screw_t4 += 1
-        if np.any(is_removal[t4_idx]):
-            removal_t4 += 1
 
-        t5_idx = deck_indices[start_ptr : start_ptr + kept_size + 4]
-        if np.sum(is_land[t5_idx]) >= 6:
+        for j in range(start_ptr, end_t4):
+            if is_removal[deck_indices[j]]:
+                removal_t4 += 1
+                break
+
+        end_t5 = end_t4 + 1
+        t5_lands = t4_lands
+        if is_land[deck_indices[end_t4]]:
+            t5_lands += 1
+        if t5_lands >= 6:
             flood_t5 += 1
 
         # Castability: each pip needs its own source of a matching color

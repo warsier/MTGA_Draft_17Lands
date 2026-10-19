@@ -1,3 +1,12 @@
+===================== RELEASE NOTES 4.24-homebrew =====================
+* warsier: [Performance] High-performance Monte Carlo simulator with nogil Numba JIT kernels and zero-allocation scalar loops.
+* warsier: [Performance] Marginal deck scoring cache reducing Pack 3 evaluation build invocations from ~304 to ~25-40 with identical results.
+* warsier: [Performance] Eliminated synchronous disk writes during table sorting and debounced preferences configuration writes.
+* warsier: [Performance] Capped idle pulse animations and throttled status dot updates, reducing main-thread idle CPU load.
+* warsier: [UI Architecture] Consolidated shared deck simulation, statistics, and sample hand views into src/ui/deck_views.py.
+* warsier: [ETL & Security] Hardened server dataset ETL pipeline with NaN rejection, payload validation, and XSS sanitization.
+* warsier: [Testing] 100% test pass rate across 969 unit, integration, and UI tests.
+
 ===================== RELEASE NOTES 4.24 =====================
 * unrealities: [Performance] Panels no longer re-render on the internal style events the UI toolkit emits while widgets are being created (dozens at launch and on every pick); they re-render only when the theme actually changes. Removes the 2-3 second stall after the window appears and most sub-second stalls between picks.
 * unrealities: [Bug] Clear Inactive Datasets now keeps every dataset of a live set (as listed by the sync manifest) plus your active dataset, instead of deleting and permanently excluding the live set's other formats. Automatic sync also no longer skips live-set datasets whose event name contains an underscore (e.g. Arena Direct Sealed).

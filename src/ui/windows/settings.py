@@ -218,7 +218,26 @@ class SettingsWindow(tkinter.Toplevel):
             self.trace_ids.clear()
 
     def _on_setting_changed(self, key: str):
+        if key in ("arena_log_location", "database_location"):
+            if not hasattr(self, "_debounce_jobs"):
+                self._debounce_jobs = {}
+            if key in self._debounce_jobs:
+                try:
+                    self.after_cancel(self._debounce_jobs[key])
+                except Exception:
+                    pass
+            self._debounce_jobs[key] = self.after(
+                300, lambda: self._persist_setting(key)
+            )
+            return
+
+        self._persist_setting(key)
+
+    def _persist_setting(self, key: str):
         """Persists single change and notifies the main application."""
+        if hasattr(self, "_debounce_jobs") and key in self._debounce_jobs:
+            del self._debounce_jobs[key]
+
         val = self.vars[key].get()
 
         # Handle type conversion
@@ -263,5 +282,16 @@ class SettingsWindow(tkinter.Toplevel):
                     self.on_update_callback()
 
     def _on_close(self):
+        if hasattr(self, "_debounce_jobs"):
+            for job in list(self._debounce_jobs.values()):
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+            self._debounce_jobs.clear()
+            for key in ("arena_log_location", "database_location"):
+                if key in self.vars:
+                    self._persist_setting(key)
+
         self._toggle_traces(False)
         self.destroy()
