@@ -1208,7 +1208,7 @@ class ArenaScanner:
             self._metrics_cache = SetMetrics(self.set_data)
             return result
 
-    def retrieve_set_metrics(self):
+    def retrieve_set_metrics(self, *args, **kwargs):
         with self.lock:
             if not hasattr(self, "_metrics_cache") or self._metrics_cache is None:
                 self._metrics_cache = SetMetrics(self.set_data)

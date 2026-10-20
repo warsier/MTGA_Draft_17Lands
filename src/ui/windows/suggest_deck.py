@@ -600,15 +600,29 @@ class SuggestDeckPanel(ttk.Frame):
                 tree._selection_bound = True
 
             metrics = (
-                self.draft.retrieve_set_metrics(False)
-                if hasattr(self.draft, "retrieve_set_metrics")
-                else getattr(self.draft, "set_metrics", None)
+                self.orchestrator.scanner.retrieve_set_metrics()
+                if hasattr(self, "orchestrator") and hasattr(self.orchestrator, "scanner")
+                else (
+                    self.draft.retrieve_set_metrics()
+                    if hasattr(self.draft, "retrieve_set_metrics")
+                    else getattr(self.draft, "set_metrics", None)
+                )
             )
-            tier_data = (
-                self.draft.retrieve_tier_data()[0]
-                if hasattr(self.draft, "retrieve_tier_data")
-                else getattr(self.draft, "tier_data", None)
+            raw_tier = (
+                self.orchestrator.scanner.retrieve_tier_data()
+                if hasattr(self, "orchestrator") and hasattr(self.orchestrator, "scanner")
+                else (
+                    self.draft.retrieve_tier_data()
+                    if hasattr(self.draft, "retrieve_tier_data")
+                    else getattr(self.draft, "tier_data", None)
+                )
             )
+            if isinstance(raw_tier, tuple):
+                tier_data = raw_tier[0]
+            elif isinstance(raw_tier, dict):
+                tier_data = raw_tier
+            else:
+                tier_data = {}
             for idx, card in enumerate(source_list):
                 row_values = DynamicTreeviewManager.format_row_values(
                     card,

@@ -296,3 +296,13 @@ class TestSuggestDeckPanel:
         labels = get_all_text(panel.stats_frame)
         assert any("Black (B): 1" in l for l in labels)
         assert any("Green (G): 1" in l for l in labels)
+
+    def test_update_tables_with_arena_scanner_signatures(self, root, tmp_path):
+        from src.log_scanner import ArenaScanner
+        scanner = ArenaScanner(None, str(tmp_path / "fake.log"), state_file=str(tmp_path / "state.json"))
+        panel = SuggestDeckPanel(root, scanner, Configuration())
+        panel.current_deck_list = [{"name": "Test Card", "count": 1, "cmc": 2, "types": ["Creature"]}]
+        panel.current_sb_list = []
+        panel._update_tables()
+        children = panel.table_manager.tree.get_children()
+        assert len(children) == 1
