@@ -46,7 +46,7 @@ class DownloadWindow(ttk.Frame):
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
 
-        canvas = tkinter.Canvas(self, highlightthickness=0)
+        canvas = tkinter.Canvas(self, highlightthickness=0, bg=Theme.BG_PRIMARY)
         scrollbar = AutoScrollbar(self, orient="vertical", command=canvas.yview)
 
         canvas.grid(row=0, column=0, sticky="nsew")
@@ -56,19 +56,51 @@ class DownloadWindow(ttk.Frame):
         container = ttk.Frame(canvas, padding=Theme.scaled_val(10))
         canvas_window = canvas.create_window((0, 0), window=container, anchor="nw")
 
+        def _update_scrollregion():
+            bbox = canvas.bbox("all")
+            if bbox:
+                c_height = canvas.winfo_height()
+                max_h = max(c_height, bbox[3])
+                canvas.configure(scrollregion=(0, 0, bbox[2], max_h))
+                if bbox[3] <= c_height:
+                    canvas.yview_moveto(0)
+
         def _on_content_resize(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
+            _update_scrollregion()
 
         def _on_canvas_resize(event):
             canvas.itemconfig(canvas_window, width=event.width)
+            _update_scrollregion()
 
         container.bind("<Configure>", _on_content_resize)
         canvas.bind("<Configure>", _on_canvas_resize)
 
+        Theme.bind_theme_change(
+            self,
+            lambda e: canvas.configure(bg=Theme.BG_PRIMARY),
+            application_wide=False,
+        )
+
+        def _safe_scroll(delta, what="units"):
+            bbox = canvas.bbox("all")
+            if bbox and bbox[3] <= canvas.winfo_height():
+                return
+            canvas.yview_scroll(delta, what)
+            if canvas.yview()[0] < 0.0:
+                canvas.yview_moveto(0.0)
+
         from src.utils import bind_scroll
 
-        bind_scroll(canvas, canvas.yview_scroll)
-        bind_scroll(container, canvas.yview_scroll)
+        bind_scroll(canvas, _safe_scroll)
+        bind_scroll(container, _safe_scroll)
+
+        def _bind_mousewheel_recursive(widget):
+            bind_scroll(widget, _safe_scroll)
+            for child in widget.winfo_children():
+                if not isinstance(child, (ttk.Treeview, tb.Treeview)):
+                    _bind_mousewheel_recursive(child)
+
+        self.bind("<Map>", lambda e: _bind_mousewheel_recursive(container), add="+")
 
         self.table_manager = DynamicTreeviewManager(
             container,

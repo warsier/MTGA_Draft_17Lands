@@ -401,6 +401,7 @@ class DashboardFrame(ttk.Frame):
         self._sidebar_canvas = tkinter.Canvas(
             self.sidebar_frame,
             highlightthickness=0,
+            bg=Theme.BG_PRIMARY,
             yscrollcommand=self._sidebar_scrollbar.set,
         )
         self._sidebar_canvas.grid(row=0, column=0, sticky="nsew")
@@ -412,28 +413,50 @@ class DashboardFrame(ttk.Frame):
             (0, 0), window=self.sidebar_container, anchor="nw"
         )
 
+        def _update_sidebar_scrollregion():
+            bbox = self._sidebar_canvas.bbox("all")
+            if bbox:
+                c_height = self._sidebar_canvas.winfo_height()
+                max_h = max(c_height, bbox[3])
+                self._sidebar_canvas.configure(scrollregion=(0, 0, bbox[2], max_h))
+                if bbox[3] <= c_height:
+                    self._sidebar_canvas.yview_moveto(0)
+
         def _on_sidebar_resize(event):
             self._sidebar_canvas.itemconfig(
                 self._sidebar_canvas_window, width=event.width
             )
+            _update_sidebar_scrollregion()
 
         def _on_sidebar_content_resize(event):
-            self._sidebar_canvas.configure(
-                scrollregion=self._sidebar_canvas.bbox("all")
-            )
+            _update_sidebar_scrollregion()
 
         self._sidebar_canvas.bind("<Configure>", _on_sidebar_resize)
         self.sidebar_container.bind("<Configure>", _on_sidebar_content_resize)
 
+        Theme.bind_theme_change(
+            self.sidebar_frame,
+            lambda e: self._sidebar_canvas.configure(bg=Theme.BG_PRIMARY),
+            application_wide=False,
+        )
+
+        def _safe_sidebar_scroll(delta, what="units"):
+            bbox = self._sidebar_canvas.bbox("all")
+            if bbox and bbox[3] <= self._sidebar_canvas.winfo_height():
+                return
+            self._sidebar_canvas.yview_scroll(delta, what)
+            if self._sidebar_canvas.yview()[0] < 0.0:
+                self._sidebar_canvas.yview_moveto(0.0)
+
         # Cross-platform safe scrolling
         from src.utils import bind_scroll
 
-        bind_scroll(self._sidebar_canvas, self._sidebar_canvas.yview_scroll)
-        bind_scroll(self.sidebar_container, self._sidebar_canvas.yview_scroll)
+        bind_scroll(self._sidebar_canvas, _safe_sidebar_scroll)
+        bind_scroll(self.sidebar_container, _safe_sidebar_scroll)
         self.sidebar_container.bind(
             "<Enter>",
             lambda e: bind_scroll(
-                self.sidebar_container, self._sidebar_canvas.yview_scroll
+                self.sidebar_container, _safe_sidebar_scroll
             ),
         )
 

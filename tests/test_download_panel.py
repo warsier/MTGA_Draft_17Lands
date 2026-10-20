@@ -438,3 +438,20 @@ class TestDownloadPanel:
         panel._delete_dataset(target_file)
 
         mock_warn.assert_called_once()
+
+    def test_download_canvas_background_and_scroll_clamping(
+        self, root, mock_sets_data, config
+    ):
+        """Verify that DownloadWindow canvas matches theme background and clamps scrolling at top=0."""
+        from src.ui.styles import Theme
+
+        panel = DownloadWindow(root, mock_sets_data, config, MagicMock())
+        canvas = panel.children["!canvas"]
+        container = canvas.children["!frame"]
+
+        assert canvas["bg"] == Theme.BG_PRIMARY
+
+        # Simulate scrolling up when at top
+        canvas.event_generate("<MouseWheel>", delta=120)
+        root.update()
+        assert container.winfo_y() == 0
