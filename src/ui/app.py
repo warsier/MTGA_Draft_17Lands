@@ -56,6 +56,7 @@ class DraftApp:
 
         # Event Tracking State
         self.current_set_data_map = {}
+        self.all_sets_data_map = {}
         self.detected_set_code = ""
         self.active_event_set = ""
         self.active_event_type = ""
@@ -203,6 +204,7 @@ class DraftApp:
             value=self.configuration.settings.deck_filter
         )
         self.vars["set_label"] = tkinter.StringVar(value="")
+        self.vars["selected_set"] = tkinter.StringVar(value="")
         self.vars["selected_event"] = tkinter.StringVar(value="")
         self.vars["selected_group"] = tkinter.StringVar(value="")
         self.vars["status_text"] = tkinter.StringVar(value="Ready")

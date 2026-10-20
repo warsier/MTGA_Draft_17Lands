@@ -619,3 +619,23 @@ def test_modern_bot_draft_pick_parsing(tmp_path):
     assert "12345" in scanner.taken_cards
 
 
+
+
+def test_retrieve_tier_data_alchemy_parent_fallback(tmp_path):
+    """Verify retrieve_tier_data falls back to parent set (FRA) if Alchemy set (Y26_FRA) has no tier data."""
+    scanner = ArenaScanner(None, str(tmp_path / "fake.log"), state_file=str(tmp_path / "state.json"))
+    scanner.tier_list = MagicMock()
+
+    def mock_retrieve_tier(set_code):
+        if set_code == "Y26_FRA":
+            return {}, 0
+        if set_code == "FRA":
+            return {"Card A": {"rating": "A"}}, 1
+        return {}, 0
+
+    scanner.tier_list.retrieve_data.side_effect = mock_retrieve_tier
+    scanner.retrieve_current_limited_event = MagicMock(return_value=("Y26_FRA", "QuickDraft"))
+
+    data = scanner.retrieve_tier_data()
+    assert data == {"Card A": {"rating": "A"}}
+    assert scanner.tier_list.retrieve_data.call_count == 2

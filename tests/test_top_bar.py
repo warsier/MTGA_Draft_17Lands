@@ -261,3 +261,43 @@ def test_update_deck_filter_options_falls_back_when_saved_key_missing(
         "Auto": constants.FILTER_OPTION_AUTO,
         "Dimir (UB)": "UB",
     }
+
+
+@patch("src.ui.top_bar.retrieve_local_set_list")
+def test_set_selector_and_alchemy_fallback(mock_retrieve, root, mock_app_context):
+    """Verify that om_set contains all available sets, and Y26_FRA QuickDraft falls back to FRA."""
+    top_bar = TopBarControls(root, mock_app_context)
+    mock_app_context._initialized = True
+
+    mock_retrieve.return_value = (
+        [
+            ("Y26FRA", "PremierDraft", "All", "2026", "2026", 100, "/mock/y26fra_premier.json", "2026"),
+            ("FRA", "PremierDraft", "All", "2026", "2026", 500, "/mock/fra_premier.json", "2026"),
+            ("FRA", "QuickDraft", "All", "2026", "2026", 500, "/mock/fra_quick.json", "2026"),
+            ("BLB", "PremierDraft", "All", "2024", "2024", 500, "/mock/blb_premier.json", "2024"),
+        ],
+        [],
+    )
+
+    mock_app_context.orchestrator.scanner.retrieve_current_limited_event.return_value = (
+        "Y26_FRA",
+        "QuickDraft",
+    )
+
+    top_bar.update_data_sources()
+
+    set_menu = top_bar.om_set["menu"]
+    set_options = [set_menu.entrycget(i, "label") for i in range(set_menu.index("end") + 1)]
+    assert "FRA" in set_options
+    assert "Y26FRA" in set_options
+    assert "BLB" in set_options
+
+    # Because Y26FRA lacks QuickDraft, it should have automatically fallen back to FRA
+    assert mock_app_context.vars["selected_set"].get() == "FRA"
+    assert mock_app_context.vars["selected_event"].get() == "QuickDraft"
+
+    # User can manually select any other set (e.g. Y26FRA)
+    mock_app_context.vars["selected_set"].set("Y26FRA")
+    top_bar.on_set_change()
+    assert mock_app_context.vars["selected_set"].get() == "Y26FRA"
+    assert mock_app_context.vars["selected_event"].get() == "PremierDraft"

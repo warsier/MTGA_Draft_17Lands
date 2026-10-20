@@ -113,9 +113,24 @@ class TopBarControls(ttk.Frame):
         )
         self.om_event.pack(side="right", padx=Theme.scaled_val(2))
 
+        if "selected_set" not in self.app.vars:
+            import tkinter
+            self.app.vars["selected_set"] = tkinter.StringVar(value="")
+
+        self.om_set = ttk.OptionMenu(
+            self.dataset_controls_frame,
+            self.app.vars["selected_set"],
+            "",
+            style="TMenubutton",
+        )
+        self.om_set.pack(side="right", padx=Theme.scaled_val(2))
+
         # Wire up Traces
         self.app.vars["deck_filter"].trace_add(
             "write", lambda *a: self.on_filter_ui_change()
+        )
+        self.app.vars["selected_set"].trace_add(
+            "write", lambda *a: self.on_set_change()
         )
         self.app.vars["selected_event"].trace_add(
             "write", lambda *a: self.on_event_change()
@@ -301,26 +316,27 @@ class TopBarControls(ttk.Frame):
 
             self.app.detected_set_code = current_set
             all_files, _ = retrieve_local_set_list()
-            self.app.current_set_data_map = {}
+            self.app.all_sets_data_map = {}
 
             def normalize_code(code_string):
                 return re.sub(r"[^A-Z0-9]", "", str(code_string).upper())
 
-            normalized_current = normalize_code(current_set)
-
             for f in all_files:
                 file_set, f_event, f_group, _, _, _, f_path, _ = f
-                if normalize_code(file_set) != normalized_current:
-                    continue
-                if f_event not in self.app.current_set_data_map:
-                    self.app.current_set_data_map[f_event] = {}
-                self.app.current_set_data_map[f_event][f_group] = f_path
+                set_key = file_set.upper()
+                if set_key not in self.app.all_sets_data_map:
+                    self.app.all_sets_data_map[set_key] = {}
+                if f_event not in self.app.all_sets_data_map[set_key]:
+                    self.app.all_sets_data_map[set_key][f_event] = {}
+                self.app.all_sets_data_map[set_key][f_event][f_group] = f_path
 
-            available_events = sorted(list(self.app.current_set_data_map.keys()))
+            available_sets = sorted(list(self.app.all_sets_data_map.keys()))
 
-            if not available_events:
+            if not available_sets:
                 self.dataset_controls_frame.pack(side="right")
                 self.app.vars["set_label"].set(f"{full_set_name} (Missing Dataset)")
+                if hasattr(self, "om_set"):
+                    self.om_set["menu"].delete(0, "end")
                 self.om_event["menu"].delete(0, "end")
                 self.om_group["menu"].delete(0, "end")
                 return
@@ -328,30 +344,41 @@ class TopBarControls(ttk.Frame):
             self.app.vars["set_label"].set(full_set_name)
             self.update_history_dropdown()
 
-            self._set_dropdown_options(
-                self.om_event, self.app.vars["selected_event"], available_events
-            )
-
-            current_selection = self.app.vars["selected_event"].get()
-
-            if event_transitioned:
-                if current_event_type in available_events:
-                    target_event = current_event_type
-                elif constants.LIMITED_TYPE_STRING_DRAFT_PREMIER in available_events:
-                    target_event = constants.LIMITED_TYPE_STRING_DRAFT_PREMIER
-                else:
-                    target_event = available_events[0]
-            else:
-                target_event = (
-                    current_selection
-                    if current_selection in available_events
-                    else available_events[0]
+            if hasattr(self, "om_set"):
+                self._set_dropdown_options(
+                    self.om_set, self.app.vars["selected_set"], available_sets
                 )
 
-            if self.app.vars["selected_event"].get() != target_event:
-                self.app.vars["selected_event"].set(target_event)
+            current_selected_set = self.app.vars["selected_set"].get()
+            target_set = ""
+
+            if not event_transitioned and current_selected_set in available_sets:
+                target_set = current_selected_set
             else:
-                self.on_event_change()
+                norm_current = normalize_code(current_set)
+                direct_match = next((s for s in available_sets if normalize_code(s) == norm_current), "")
+
+                base_code = re.sub(r"^Y(\d{2})?_?", "", str(current_set).upper())
+                parent_match = next((s for s in available_sets if normalize_code(s) == normalize_code(base_code)), "") if base_code else ""
+
+                if direct_match:
+                    events_in_direct = self.app.all_sets_data_map.get(direct_match, {})
+                    if current_event_type in events_in_direct or not parent_match:
+                        target_set = direct_match
+                    else:
+                        target_set = parent_match
+                elif parent_match:
+                    target_set = parent_match
+                else:
+                    target_set = available_sets[0]
+
+            if self.app.vars["selected_set"].get() != target_set:
+                self.app.vars["selected_set"].set(target_set)
+            else:
+                self.on_set_change(
+                    event_transitioned=event_transitioned,
+                    current_event_type=current_event_type,
+                )
 
         except Exception as e:
             logger.error(f"Error in update_data_sources: {e}")
@@ -385,6 +412,40 @@ class TopBarControls(ttk.Frame):
 
             if self.app.tabs_visible and "🔴 Live" not in selection:
                 self.app.notebook.select(self.app.panel_suggest)
+
+    def on_set_change(self, event_transitioned=False, current_event_type=""):
+        if not self.app._initialized:
+            return
+        selected_set = self.app.vars["selected_set"].get()
+        if not selected_set or selected_set not in getattr(self.app, "all_sets_data_map", {}):
+            return
+
+        if not current_event_type:
+            current_event_type = getattr(self.app, "active_event_type", "")
+
+        self.app.current_set_data_map = self.app.all_sets_data_map[selected_set]
+        available_events = sorted(list(self.app.current_set_data_map.keys()))
+
+        self._set_dropdown_options(
+            self.om_event, self.app.vars["selected_event"], available_events
+        )
+
+        current_selection = self.app.vars["selected_event"].get()
+
+        if event_transitioned or current_selection not in available_events:
+            if current_event_type in available_events:
+                target_event = current_event_type
+            elif constants.LIMITED_TYPE_STRING_DRAFT_PREMIER in available_events:
+                target_event = constants.LIMITED_TYPE_STRING_DRAFT_PREMIER
+            else:
+                target_event = available_events[0] if available_events else ""
+        else:
+            target_event = current_selection
+
+        if target_event and self.app.vars["selected_event"].get() != target_event:
+            self.app.vars["selected_event"].set(target_event)
+        else:
+            self.on_event_change()
 
     def on_event_change(self):
         if not self.app._initialized:

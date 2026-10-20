@@ -1218,6 +1218,11 @@ class ArenaScanner:
         with self.lock:
             event_set, _ = self.retrieve_current_limited_event()
             data, _ = self.tier_list.retrieve_data(event_set)
+            if not data and event_set:
+                import re
+                base_code = re.sub(r"^Y(\d{2})?_?", "", str(event_set).upper())
+                if base_code and base_code != event_set.upper():
+                    data, _ = self.tier_list.retrieve_data(base_code)
             return data
 
     @staticmethod
