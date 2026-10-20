@@ -68,6 +68,11 @@ class AppMenuBar:
             label="Practice: Import Sealed Pool from Clipboard",
             command=lambda: PracticeDialog(self.root, self.app_context, is_import=True),
         )
+        tools_m.add_separator()
+        tools_m.add_command(
+            label="Mini Mode (Overlay) [F11]",
+            command=self.app_context._enable_overlay,
+        )
 
         # --- THEME MENU ---
         theme_m = tkinter.Menu(m, tearoff=0)

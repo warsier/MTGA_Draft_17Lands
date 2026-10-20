@@ -39,7 +39,13 @@ class CompactOverlay(tb.Toplevel):
                 "gihwr",
             ]
 
-        self.overrideredirect(True)
+        # Standard window decoration & resizability
+        self.resizable(True, True)
+        self.overrideredirect(False)
+        self.title("MTGA Draft Tool - Mini Mode")
+        self.protocol("WM_DELETE_WINDOW", self._close_overlay)
+        self.bind("<Escape>", lambda e: self._close_overlay())
+        self.bind("<F11>", lambda e: self._close_overlay())
         geom = getattr(
             self.configuration.settings,
             "overlay_geometry",
@@ -61,7 +67,10 @@ class CompactOverlay(tb.Toplevel):
     def _stop_move(self, event):
         self.x = None
         self.y = None
-        self._save_geometry()
+        try:
+            self._save_geometry()
+        except Exception:
+            pass
 
     def _do_move(self, event):
         deltax = event.x - self.x
@@ -86,14 +95,20 @@ class CompactOverlay(tb.Toplevel):
         self.geometry(f"{new_w}x{new_h}")
 
     def _stop_resize(self, event):
-        self._save_geometry()
+        try:
+            self._save_geometry()
+        except Exception:
+            pass
 
     def _save_geometry(self):
         self.configuration.settings.overlay_geometry = self.geometry()
         write_configuration(self.configuration)
 
     def _close_overlay(self):
-        self._save_geometry()
+        try:
+            self._save_geometry()
+        except Exception:
+            pass
         self.on_restore()
 
     def _build_ui(self):
@@ -105,18 +120,20 @@ class CompactOverlay(tb.Toplevel):
         header.bind("<ButtonRelease-1>", self._stop_move)
         header.bind("<B1-Motion>", self._do_move)
 
-        # Dynamic Info Label (Format | Group | Filter)
-        self.lbl_info = tb.Label(
-            header, text="", font=Theme.scaled_font(9), bootstyle="inverse-secondary"
+        # Action Buttons - PACKED RIGHT FIRST so they can NEVER be pushed off-screen
+        self.btn_restore = tb.Button(
+            header,
+            text="Default Mode",
+            bootstyle="info-outline",
+            command=self._close_overlay,
         )
-        self.lbl_info.pack(side=LEFT, padx=Theme.scaled_val((8, 0)))
+        self.btn_restore.pack(side=RIGHT, padx=Theme.scaled_val((4, 8)))
 
-        # Action Buttons
-        tb.Button(header, text="⤢", bootstyle="link", command=self._close_overlay).pack(
-            side=RIGHT, padx=Theme.scaled_val((0, 5))
-        )
         self.btn_settings = tb.Button(
-            header, text="⚙", bootstyle="link", command=self._show_settings_menu
+            header,
+            text="⚙",
+            bootstyle="secondary-outline",
+            command=self._show_settings_menu,
         )
         self.btn_settings.pack(side=RIGHT, padx=Theme.scaled_val(2))
 
@@ -128,16 +145,24 @@ class CompactOverlay(tb.Toplevel):
         )
         self.lbl_status.pack(side=RIGHT, padx=Theme.scaled_val(5))
 
+        # Dynamic Info Label (Format | Group | Filter) - PACKED LEFT with fill=X
+        self.lbl_info = tb.Label(
+            header, text="", font=Theme.scaled_font(9), bootstyle="inverse-secondary"
+        )
+        self.lbl_info.pack(
+            side=LEFT, fill=X, expand=True, padx=Theme.scaled_val((8, 4))
+        )
+
         # --- FOOTER (Resize Grip) ---
         footer = tb.Frame(self, bootstyle="secondary")
         footer.pack(fill=X, side=BOTTOM)
 
         grip = tb.Label(
             footer,
-            text=" ⇲ ",
-            cursor="hand2",
+            text=" /// ",
+            cursor="size_nw_se",
             bootstyle="inverse-secondary",
-            font=Theme.scaled_font(12),
+            font=Theme.scaled_font(9, "bold"),
         )
         grip.pack(side=RIGHT, padx=Theme.scaled_val(2))
         grip.bind("<ButtonPress-1>", self._start_resize)
@@ -273,6 +298,11 @@ class CompactOverlay(tb.Toplevel):
 
     def _show_settings_menu(self):
         menu = tkinter.Menu(self, tearoff=0)
+        menu.add_command(
+            label="Return to Default Mode (Esc)",
+            command=self._close_overlay,
+        )
+        menu.add_separator()
         filter_menu = tkinter.Menu(menu, tearoff=0)
         for label in self.app_context.deck_filter_map.keys():
             filter_menu.add_command(

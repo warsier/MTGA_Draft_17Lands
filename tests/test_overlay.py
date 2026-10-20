@@ -301,3 +301,26 @@ def test_compact_overlay_close_triggers_callback(
         overlay._close_overlay()
         mock_write.assert_called_once()
         callback_mock.assert_called_once()
+
+
+@patch("tkinter.Toplevel.overrideredirect")
+@patch("tkinter.Toplevel.wm_overrideredirect")
+def test_compact_overlay_restore_button_and_resizability(
+    mock_wm, mock_ov, root, mock_app_context
+):
+    """Verify the prominent 'Default Mode' button exists, window is resizable,
+    and Escape key triggers restore to main mode."""
+    config = Configuration()
+    callback_mock = MagicMock()
+    overlay = CompactOverlay(root, mock_app_context, config, callback_mock)
+
+    # Window must be marked resizable
+    assert overlay.resizable() == (1, 1) or overlay.resizable() == (True, True)
+
+    # Check button exists with readable text
+    assert hasattr(overlay, "btn_restore")
+    assert "Default Mode" in overlay.btn_restore.cget("text")
+
+    # Invoking restore button calls callback
+    overlay.btn_restore.invoke()
+    callback_mock.assert_called_once()

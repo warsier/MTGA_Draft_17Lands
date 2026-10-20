@@ -127,3 +127,37 @@ class TestDraftRecapScreen:
 
         # UI should not have updated
         assert "Pool Power Grade: --" in recap.lbl_recovery_grade.cget("text")
+
+    def test_recap_formats_zero_winrate_and_duplicate_cards(self, root, mock_metrics):
+        """Verify that unrated / zero win-rate cards display (-) rather than (0.0%),
+        and duplicate copies are stacked cleanly (e.g. 2x Card Name)."""
+        recap = DraftRecapScreen(root)
+
+        pool = [
+            # Two copies of high-WR card
+            {"name": "Restore with Empathy", "types": ["Instant"], "rarity": "Uncommon",
+             "deck_colors": {"All Decks": {"gihwr": 60.2, "alsa": 3.0}}},
+            {"name": "Restore with Empathy", "types": ["Instant"], "rarity": "Uncommon",
+             "deck_colors": {"All Decks": {"gihwr": 60.2, "alsa": 3.0}}},
+            # Rare with no 17Lands data (0.0 WR)
+            {"name": "Chandra, Torch of Defiance", "types": ["Planeswalker"], "rarity": "Mythic",
+             "deck_colors": {"All Decks": {"gihwr": 0.0, "alsa": 1.0}}},
+            # Another rare with 0.0 WR
+            {"name": "Rockfall Vale", "types": ["Land"], "rarity": "Rare",
+             "deck_colors": {"All Decks": {"gihwr": 0.0, "alsa": 2.0}}},
+        ]
+        # Pad to 40 cards
+        for i in range(36):
+            pool.append({"name": f"Common {i}", "types": ["Creature"], "rarity": "Common",
+                         "deck_colors": {"All Decks": {"gihwr": 54.0, "alsa": 5.0}}})
+
+        recap.update_summary(pool, mock_metrics, "draft-test-zero", "PremierDraft")
+
+        best_text = recap.lbl_recap_best.cget("text")
+        assert "2x Restore with Empathy (60.2%)" in best_text
+
+        rares_text = recap.lbl_recap_rares.cget("text")
+        # Should NOT say (0.0%)
+        assert "0.0%" not in rares_text
+        assert "Chandra, Torch of Defiance (-)" in rares_text
+        assert "Rockfall Vale (-)" in rares_text

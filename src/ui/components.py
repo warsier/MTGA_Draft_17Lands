@@ -1490,10 +1490,14 @@ class ManaCurvePlot(tb.Frame):
         w = self.canvas.winfo_width()
         if w < 10:
             return
-        bw, gp = Theme.scaled_val(14), Theme.scaled_val(2)
-        tw = (len(self.current) * bw) + ((len(self.current) - 1) * gp)
+        num_bars = len(self.current) or 7
+        available_w = max(w - Theme.scaled_val(24), Theme.scaled_val(140))
+        computed_bw = int(available_w / (num_bars * 1.35))
+        bw = max(Theme.scaled_val(16), min(Theme.scaled_val(32), computed_bw))
+        gp = max(Theme.scaled_val(3), min(Theme.scaled_val(8), int(bw * 0.22)))
+        tw = (num_bars * bw) + ((num_bars - 1) * gp)
         sx, sc = (
-            (w - tw) / 2,
+            max(Theme.scaled_val(6), (w - tw) / 2),
             (self.canvas_height - Theme.scaled_val(25))
             / max(max(self.current, default=0), max(self.ideal, default=0), 5),
         )
@@ -1585,11 +1589,18 @@ class TypePieChart(tb.Frame):
             "Land": Theme.BG_TERTIARY,
         }
 
-        legend_w = Theme.scaled_val(85)
-        gap = Theme.scaled_val(20)
+        try:
+            from tkinter import font as tkfont
+            font_obj = tkfont.Font(font=Theme.scaled_font(9))
+            max_label_w = max(font_obj.measure(f"{lb}: {count}") for lb, count in self.counts.items())
+        except Exception:
+            max_label_w = Theme.scaled_val(95)
+
+        legend_w = max(Theme.scaled_val(115), max_label_w + Theme.scaled_val(16))
+        gap = Theme.scaled_val(16)
         pie_r = self.pie_size / 2
         total_w = legend_w + gap + self.pie_size
-        sx = max(0, (w - total_w) / 2)
+        sx = max(Theme.scaled_val(6), (w - total_w) / 2)
 
         # 1. Draw Legend on the Left
         ly = max(

@@ -252,14 +252,30 @@ class DraftRecapScreen(ttk.Frame):
             text=arch_text if arch_text else "None Identified"
         )
 
+        def format_card_list(cards, max_items=6, default_msg="None"):
+            counts = {}
+            for c in cards:
+                n = c.get("name", "Unknown")
+                counts[n] = counts.get(n, 0) + 1
+            seen = set()
+            lines = []
+            for c in cards:
+                n = c.get("name", "Unknown")
+                if n in seen:
+                    continue
+                seen.add(n)
+                wr = get_gihwr(c)
+                wr_str = f" ({wr:.1f}%)" if wr > 0 else " (-)"
+                cnt = f"{counts[n]}x " if counts[n] > 1 else ""
+                lines.append(f"• {cnt}{n}{wr_str}\n")
+                if len(lines) >= max_items:
+                    break
+            return "".join(lines) or default_msg
+
         # 3. BEST CARDS
-        best_text = "".join(
-            [
-                f"• {c.get('name', 'Unknown')} ({get_gihwr(c):.1f}%)\n"
-                for c in top_23[:6]
-            ]
+        self.lbl_recap_best.config(
+            text=format_card_list(top_23, max_items=6, default_msg="No cards drafted.")
         )
-        self.lbl_recap_best.config(text=best_text)
 
         # 4. STEALS & REACHES
         total_cards = len(taken_cards)
@@ -352,18 +368,12 @@ class DraftRecapScreen(ttk.Frame):
         ]
         staples.sort(key=get_gihwr, reverse=True)
         self.lbl_synergy_staples.config(
-            text="".join(
-                [f"• {c.get('name')} ({get_gihwr(c):.1f}%)\n" for c in staples[:6]]
-            )
-            or "No premium staples drafted."
+            text=format_card_list(staples, max_items=6, default_msg="No premium staples drafted.")
         )
 
         non_basics.sort(key=get_gihwr, reverse=True)
         self.lbl_synergy_lands.config(
-            text="".join(
-                [f"• {c.get('name')} ({get_gihwr(c):.1f}%)\n" for c in non_basics[:6]]
-            )
-            or "No non-basic lands drafted."
+            text=format_card_list(non_basics, max_items=6, default_msg="No non-basic lands drafted.")
         )
 
         # 6. RARES & MYTHICS
@@ -374,10 +384,7 @@ class DraftRecapScreen(ttk.Frame):
         ]
         rares.sort(key=get_gihwr, reverse=True)
         self.lbl_recap_rares.config(
-            text="".join(
-                [f"• {c.get('name')} ({get_gihwr(c):.1f}%)\n" for c in rares[:10]]
-            )
-            or "No Rares or Mythics drafted."
+            text=format_card_list(rares, max_items=10, default_msg="No Rares or Mythics drafted.")
         )
 
         # 7. CHARTS

@@ -87,6 +87,7 @@ class DraftApp:
         self.layout_manager.build()
         self.menu_bar = AppMenuBar(self.root, self)
         self.loading_overlay = LoadingOverlay(self.root)
+        self.root.bind("<F11>", lambda e: self._enable_overlay())
 
         # 5. ATTACH INFRASTRUCTURE SERVICES
         self.notifications = Notifications(
@@ -265,20 +266,22 @@ class DraftApp:
 
     def _disable_overlay(self):
         if self.overlay_window:
-            self.overlay_window.destroy()
+            try:
+                self.overlay_window.destroy()
+            except Exception:
+                pass
             self.overlay_window = None
-        self.root.deiconify()
-        current_scale = constants.UI_SIZE_DICT.get(
-            self.configuration.settings.ui_size, 1.0
-        )
-        Theme.apply(
-            self.root,
-            palette=self.configuration.settings.theme,
-            engine=getattr(self.configuration.settings, "theme_base", "clam"),
-            custom_path=self.configuration.settings.theme_custom_path,
-            scale=current_scale,
-        )
-        self._refresh_ui_data()
+        try:
+            self.root.deiconify()
+            self.root.state("normal")
+            self.root.lift()
+            self.root.focus_force()
+        except Exception as e:
+            logger.error(f"Error restoring main root window: {e}")
+        try:
+            self._refresh_ui_data()
+        except Exception as e:
+            logger.error(f"Error refreshing UI data on overlay restore: {e}")
 
     def _on_close(self):
         """Save geometry and sash state before closing."""
