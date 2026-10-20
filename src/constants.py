@@ -33,6 +33,8 @@ BASE_DIR = get_base_dir()
 RESOURCE_DIR = get_resource_dir()
 
 APPLICATION_VERSION = "4.24"
+APPLICATION_TAG = "homebrew"
+DISPLAY_VERSION = f"{APPLICATION_VERSION}-{APPLICATION_TAG}"
 OLD_APPLICATION_VERSION = "4.22"
 PREVIOUS_APPLICATION_VERSION = "0423"
 
@@ -235,10 +237,20 @@ DRAFT_PICK_STRING_PREMIER_OLD = "[UnityCrossThreadLogger]==> Draft.MakeHumanDraf
 DRAFT_PACK_STRING_PREMIER = "[UnityCrossThreadLogger]Draft.Notify "
 
 DRAFT_START_STRING_QUICK_DRAFT = "[UnityCrossThreadLogger]==> BotDraft_DraftStatus "
+DRAFT_START_STRING_QUICK_DRAFT_MODERN = (
+    "[UnityCrossThreadLogger]==> BotDraftDraftStatus "
+)
 DRAFT_PACK_STRING_QUICK = "DraftPack"
 DRAFT_PICK_STRING_QUICK = "[UnityCrossThreadLogger]==> BotDraft_DraftPick "
+DRAFT_PICK_STRING_QUICK_MODERN = (
+    "[UnityCrossThreadLogger]==> BotDraftDraftPick "
+)
 
-DRAFT_START_STRINGS = [DRAFT_START_STRING_PREMIER, DRAFT_START_STRING_QUICK_DRAFT]
+DRAFT_START_STRINGS = [
+    DRAFT_START_STRING_PREMIER,
+    DRAFT_START_STRING_QUICK_DRAFT,
+    DRAFT_START_STRING_QUICK_DRAFT_MODERN,
+]
 
 DATA_SOURCES_NONE = {"None": ""}
 
@@ -963,5 +975,5 @@ CARD_NAME_CORRECTIONS = {
 }
 
 # --- Remote ETL Pipeline ---
-REMOTE_MANIFEST_URL = "https://warsier.github.io/MTGA_Draft_17Lands/manifest.json"
-REMOTE_DATASET_BASE_URL = "https://warsier.github.io/MTGA_Draft_17Lands/"
+REMOTE_MANIFEST_URL = "https://unrealities.github.io/MTGA_Draft_17Lands/manifest.json"
+REMOTE_DATASET_BASE_URL = "https://unrealities.github.io/MTGA_Draft_17Lands/"

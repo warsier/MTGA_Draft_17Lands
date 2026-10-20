@@ -84,8 +84,11 @@ class AppController:
         def _check_app():
             try:
                 v, _ = AppUpdate().retrieve_file_version()
-                if v and float(v) > float(constants.APPLICATION_VERSION):
-                    self.root.after(0, lambda: self.app.menu_bar.notify_app_update(v))
+                if v:
+                    def _parse_v(val):
+                        return float(str(val).strip().split("-")[0].lstrip("vV"))
+                    if _parse_v(v) > _parse_v(constants.APPLICATION_VERSION):
+                        self.root.after(0, lambda: self.app.menu_bar.notify_app_update(v))
             except Exception as e:
                 logger.error(f"App update check failed: {e}")
 

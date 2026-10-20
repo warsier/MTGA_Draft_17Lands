@@ -247,7 +247,7 @@ def main():
     # --- CI/CD SMOKE TEST EXIT ---
     # Instantly boots the app, validates all C-extension imports, and exits safely.
     if args.version:
-        print(f"MTGA Draft Tool v{constants.APPLICATION_VERSION}")
+        print(f"MTGA Draft Tool v{constants.DISPLAY_VERSION}")
         sys.exit(0)
 
     # Load Config

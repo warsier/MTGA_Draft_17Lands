@@ -85,7 +85,7 @@ class SplashWindow:
 
         ttk.Label(
             container,
-            text=f"Version {constants.APPLICATION_VERSION}",
+            text=f"Version {constants.DISPLAY_VERSION}",
             font=Theme.scaled_font(9),
             foreground=Theme.TEXT_MAIN,
         ).pack(pady=(0, Theme.scaled_val(15)))

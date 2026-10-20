@@ -209,6 +209,23 @@ class ArenaScanner:
                 self.draft_start_time = state.get("draft_start_time", "")
 
                 if self.draft_type != constants.LIMITED_TYPE_UNKNOWN:
+                    # Self-heal misclassified draft types from older versions
+                    if self.event_string:
+                        is_match, ev_type, _, _, _ = self.__check_special_event(
+                            self.event_string
+                        )
+                        if not is_match:
+                            is_match, ev_type, _, _, _ = self.__check_standard_event(
+                                self.event_string
+                            )
+                        if is_match and ev_type in constants.LIMITED_TYPES_DICT:
+                            correct_type = constants.LIMITED_TYPES_DICT[ev_type]
+                            if self.draft_type != correct_type:
+                                logger.info(
+                                    f"Correcting draft_type from {self.draft_type} to {correct_type} for event {self.event_string}"
+                                )
+                                self.draft_type = correct_type
+
                     logger.info(
                         f"Restored previous draft state: {self.event_string} (Pack {self.current_pack}, Pick {self.current_pick})"
                     )
@@ -404,6 +421,8 @@ class ArenaScanner:
             raw_id = json_find("id", event_data)
             draft_id = str(raw_id) if raw_id is not None else ""
             event_name = json_find("EventName", event_data)
+            if not event_name or not isinstance(event_name, str):
+                return update, event_type, draft_id
 
             with self.lock:
                 current_event_string = self.event_string
@@ -470,16 +489,53 @@ class ArenaScanner:
         number_of_players = 8
         event_sections = event_name.split("_")
 
+        upper_sections = [sec.upper() for sec in event_sections]
+        upper_name = event_name.upper().replace("_", "")
+
         events = [
             i for i in constants.LIMITED_TYPES_DICT for x in event_sections if i in x
         ]
-        if not events and [
-            i
-            for i in constants.DRAFT_DETECTION_CATCH_ALL
-            for x in event_sections
-            if i in x
-        ]:
-            events.append(constants.LIMITED_TYPE_STRING_DRAFT_PREMIER)
+        if not events:
+            # Check for Bot / Quick Draft (e.g. Y26_FRA_Bot_Draft_20261017, Quick_Draft, etc.)
+            if (
+                "BOT" in upper_sections
+                or "QUICK" in upper_sections
+                or "BOTDRAFT" in upper_name
+                or "QUICKDRAFT" in upper_name
+            ):
+                if "PICKTWO" in upper_name or (
+                    "PICK" in upper_sections and "TWO" in upper_sections
+                ):
+                    events.append(constants.LIMITED_TYPE_STRING_DRAFT_PICK_TWO_QUICK)
+                else:
+                    events.append(constants.LIMITED_TYPE_STRING_DRAFT_QUICK)
+            # Check for Traditional Draft
+            elif (
+                "TRAD" in upper_sections
+                or "TRADITIONAL" in upper_sections
+                or "TRADDRAFT" in upper_name
+            ):
+                if "PICKTWO" in upper_name or (
+                    "PICK" in upper_sections and "TWO" in upper_sections
+                ):
+                    events.append(constants.LIMITED_TYPE_STRING_DRAFT_PICK_TWO_TRAD)
+                else:
+                    events.append(constants.LIMITED_TYPE_STRING_DRAFT_TRAD)
+            # Check for Pick Two Premier Draft
+            elif "PICKTWO" in upper_name or (
+                "PICK" in upper_sections and "TWO" in upper_sections
+            ):
+                events.append(constants.LIMITED_TYPE_STRING_DRAFT_PICK_TWO)
+            # Check generic catch-all Draft -> PremierDraft
+            elif (
+                any(
+                    i.upper() in sec
+                    for i in constants.DRAFT_DETECTION_CATCH_ALL
+                    for sec in upper_sections
+                )
+                or "DRAFT" in upper_name
+            ):
+                events.append(constants.LIMITED_TYPE_STRING_DRAFT_PREMIER)
 
         if events:
             upper_sections = [sec.upper() for sec in event_sections]
@@ -521,7 +577,7 @@ class ArenaScanner:
             event_label = event_type
             event_match = True
             number_of_players = (
-                4 if constants.PICK_TWO_EVENT_STRING in event_name else 8
+                4 if constants.PICK_TWO_EVENT_STRING in event_name or ("PICK" in upper_sections and "TWO" in upper_sections) else 8
             )
 
         return event_match, event_type, event_label, event_set, number_of_players
@@ -1044,7 +1100,12 @@ class ArenaScanner:
             )
 
         return self._parse_events(
-            "pick_offset", [constants.DRAFT_PICK_STRING_QUICK], _extract
+            "pick_offset",
+            [
+                constants.DRAFT_PICK_STRING_QUICK,
+                constants.DRAFT_PICK_STRING_QUICK_MODERN,
+            ],
+            _extract,
         )
 
     def _search_card_pool(self):

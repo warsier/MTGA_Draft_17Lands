@@ -103,7 +103,7 @@ class DraftApp:
         )
 
         # 7. FINAL WINDOW PROTOCOL & METADATA
-        self.root.title(f"MTGA Draft Tool v{constants.APPLICATION_VERSION}")
+        self.root.title(f"MTGA Draft Tool v{constants.DISPLAY_VERSION}")
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.attributes("-topmost", self.configuration.settings.always_on_top)
 

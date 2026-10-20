@@ -550,3 +550,73 @@ def test_scanner_color_win_rate_hides_zero_percent_pairs():
         "WU",
     }
     assert "WU (57.2%)" in offered
+
+
+def test_bot_draft_detection_modern_event_name(session_scanner):
+    """Verify that modern bot draft event strings such as Y26_FRA_Bot_Draft_20261017
+    are correctly classified as QuickDraft with correct sets and 8 players."""
+    from src import constants
+
+    match, ev_type, label, sets, players = session_scanner._ArenaScanner__check_standard_event(
+        "Y26_FRA_Bot_Draft_20261017"
+    )
+    assert match is True
+    assert ev_type == constants.LIMITED_TYPE_STRING_DRAFT_QUICK
+    assert constants.LIMITED_TYPES_DICT[ev_type] == constants.LIMITED_TYPE_DRAFT_QUICK
+    assert players == 8
+
+
+def test_bot_draft_state_restoration_self_healing(tmp_path):
+    """Verify that if state was previously saved with a misclassified draft_type
+    (e.g., PremierDraft for a Bot Draft event), restoring state automatically heals it to QuickDraft."""
+    import json
+    from src import constants
+
+    state_file = tmp_path / "test_state.json"
+    bad_state = {
+        "draft_type": constants.LIMITED_TYPE_DRAFT_PREMIER_V2,
+        "draft_sets": ["FRA"],
+        "draft_label": "PremierDraft",
+        "event_string": "Y26_FRA_Bot_Draft_20261017",
+        "current_pack": 1,
+        "current_pick": 1,
+    }
+    with open(state_file, "w", encoding="utf-8") as f:
+        json.dump(bad_state, f)
+
+    scanner = ArenaScanner(str(tmp_path / "Player.log"), MagicMock(), retrieve_unknown=False)
+    scanner.state_file = str(state_file)
+    assert scanner._load_state() is True
+    assert scanner.draft_type == constants.LIMITED_TYPE_DRAFT_QUICK
+
+
+def test_constants_display_version_and_manifest():
+    """Verify DISPLAY_VERSION contains -homebrew and remote manifest points to unrealities."""
+    from src import constants
+
+    assert constants.APPLICATION_VERSION == "4.24"
+    assert constants.APPLICATION_TAG == "homebrew"
+    assert constants.DISPLAY_VERSION == "4.24-homebrew"
+    assert "unrealities.github.io" in constants.REMOTE_MANIFEST_URL
+    assert "unrealities.github.io" in constants.REMOTE_DATASET_BASE_URL
+
+
+def test_modern_bot_draft_pick_parsing(tmp_path):
+    """Verify that modern BotDraftDraftPick lines without underscores are picked up correctly."""
+    from src import constants
+
+    log_file = tmp_path / "Player.log"
+    # Modern BotDraftDraftPick payload
+    pick_line = '[UnityCrossThreadLogger]==> BotDraftDraftPick {"CardId": 12345, "PackNumber": 0, "PickNumber": 0}\n'
+    log_file.write_text(pick_line, encoding="utf-8")
+
+    scanner = ArenaScanner(str(log_file), MagicMock(), retrieve_unknown=False)
+    scanner.clear_draft(True)
+    scanner.draft_type = constants.LIMITED_TYPE_DRAFT_QUICK
+    scanner.number_of_players = 8
+
+    updated = scanner._search_pick_bot()
+    assert updated is True
+    assert "12345" in scanner.taken_cards
+
+

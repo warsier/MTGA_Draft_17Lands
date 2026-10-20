@@ -1,7 +1,7 @@
 ; -- MtgaDraft.iss --
 [Setup]
-AppName=MTGA Draft Tool
-AppVersion=4.24
+AppName=MTGA Draft Tool (Homebrew Edition)
+AppVersion=4.24-homebrew
 WizardStyle=modern
 DefaultDirName={sd}\MtgaDraftTool
 DefaultGroupName=MtgaDraftTool
