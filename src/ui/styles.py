@@ -151,6 +151,29 @@ class Theme:
                     custom_themes[label] = os.path.join(theme_dir, f)
         return custom_themes
 
+    _theme_listeners = []
+    _dispatcher_bound = False
+
+    @classmethod
+    def _dispatch_theme_change(cls, event=None):
+        alive_listeners = []
+        for ref, cb, state in cls._theme_listeners:
+            w = ref()
+            if w is not None:
+                try:
+                    if hasattr(w, "winfo_exists") and not w.winfo_exists():
+                        continue
+                except Exception:
+                    continue
+                alive_listeners.append((ref, cb, state))
+                if state["seen"] != cls.generation:
+                    state["seen"] = cls.generation
+                    try:
+                        cb(event)
+                    except Exception:
+                        pass
+        cls._theme_listeners = alive_listeners
+
     @classmethod
     def bind_theme_change(cls, widget, callback, application_wide=True):
         """Run ``callback`` once each time Theme.apply() changes the theme.
@@ -161,16 +184,25 @@ class Theme:
         each one as a full theme change and re-rendered themselves, stalling
         the UI for seconds. The gate compares Theme.generation instead.
         """
+        import weakref
         state = {"seen": cls.generation}
 
-        def handler(event=None):
-            if state["seen"] == cls.generation:
-                return
-            state["seen"] = cls.generation
-            callback(event)
+        if application_wide:
+            cls._theme_listeners.append((weakref.ref(widget), callback, state))
+            if not cls._dispatcher_bound:
+                try:
+                    widget.bind_all("<<ThemeChanged>>", cls._dispatch_theme_change, add="+")
+                    cls._dispatcher_bound = True
+                except Exception:
+                    pass
+        else:
+            def handler(event=None):
+                if state["seen"] == cls.generation:
+                    return
+                state["seen"] = cls.generation
+                callback(event)
 
-        binder = widget.bind_all if application_wide else widget.bind
-        binder("<<ThemeChanged>>", handler, add="+")
+            widget.bind("<<ThemeChanged>>", handler, add="+")
 
     @classmethod
     def apply(cls, root, palette="Neutral", engine=None, custom_path="", scale=1.0):

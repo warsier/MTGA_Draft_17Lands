@@ -354,11 +354,11 @@ def test_powered_cube_premier(session_scanner, entry_label, expected, entry_stri
     )
 
 
-def test_scanner_retrieve_color_win_rate_mismatch_handling():
+def test_scanner_retrieve_color_win_rate_mismatch_handling(tmp_path):
     """
     Verify that ArenaScanner correctly maps dataset keys to UI labels even if they are stored differently.
     """
-    scanner = ArenaScanner("log.txt", MagicMock(), retrieve_unknown=False)
+    scanner = ArenaScanner("log.txt", MagicMock(), retrieve_unknown=False, state_file=str(tmp_path / "state.json"))
 
     # Mock dataset returning ratings with normalized keys (e.g., "WG")
     scanner.set_data.get_color_ratings = MagicMock(
@@ -531,13 +531,13 @@ def test_log_suspend(session_scanner):
     assert session_scanner.draft_log.level == logging.INFO
 
 
-def test_scanner_color_win_rate_hides_zero_percent_pairs():
+def test_scanner_color_win_rate_hides_zero_percent_pairs(tmp_path):
     """Pairs the dataset lists at 0.0% (no games) are not offered; pairs with
     any win rate are, however thin their per-card coverage. Auto and All Decks
     are always present."""
     from src import constants
 
-    scanner = ArenaScanner("log.txt", MagicMock(), retrieve_unknown=False)
+    scanner = ArenaScanner("log.txt", MagicMock(), retrieve_unknown=False, state_file=str(tmp_path / "state.json"))
     scanner.set_data.get_color_ratings = MagicMock(
         return_value={"All Decks": 55.0, "WU": 57.2, "WR": 0.0, "UB": 0, "RG": None}
     )
@@ -584,8 +584,7 @@ def test_bot_draft_state_restoration_self_healing(tmp_path):
     with open(state_file, "w", encoding="utf-8") as f:
         json.dump(bad_state, f)
 
-    scanner = ArenaScanner(str(tmp_path / "Player.log"), MagicMock(), retrieve_unknown=False)
-    scanner.state_file = str(state_file)
+    scanner = ArenaScanner(str(tmp_path / "Player.log"), MagicMock(), retrieve_unknown=False, state_file=str(state_file))
     assert scanner._load_state() is True
     assert scanner.draft_type == constants.LIMITED_TYPE_DRAFT_QUICK
 
@@ -610,7 +609,7 @@ def test_modern_bot_draft_pick_parsing(tmp_path):
     pick_line = '[UnityCrossThreadLogger]==> BotDraftDraftPick {"CardId": 12345, "PackNumber": 0, "PickNumber": 0}\n'
     log_file.write_text(pick_line, encoding="utf-8")
 
-    scanner = ArenaScanner(str(log_file), MagicMock(), retrieve_unknown=False)
+    scanner = ArenaScanner(str(log_file), MagicMock(), retrieve_unknown=False, state_file=str(tmp_path / "state.json"))
     scanner.clear_draft(True)
     scanner.draft_type = constants.LIMITED_TYPE_DRAFT_QUICK
     scanner.number_of_players = 8

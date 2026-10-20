@@ -26,6 +26,7 @@ from src.ui.components import (
     TypePieChart,
     CardToolTip,
     AutoScrollbar,
+    CardImageLoader,
 )
 from src.card_logic import copy_deck, get_deck_metrics
 from src.sealed_logic import SealedSession, generate_sealed_shells
@@ -70,6 +71,7 @@ class SealedStudioWindow(tb.Toplevel):
         # State
         self.view_mode = "visual"  # Options: "visual" or "list"
         self.image_cache = {}
+        self.image_loader = CardImageLoader
         self.image_executor = ThreadPoolExecutor(max_workers=6)
 
         self.filter_vars = {
@@ -853,7 +855,14 @@ class SealedStudioWindow(tb.Toplevel):
         card_list.sort(key=lambda x: (x.get("cmc", 0), x.get("name", "")))
 
         active_filter = "All Decks"
-        tier_data = getattr(self.draft, "tier_data", None) if hasattr(self, "draft") else None
+        tier_data = None
+        if hasattr(self, "app_context") and self.app_context and hasattr(self.app_context, "orchestrator") and self.app_context.orchestrator:
+            scanner = getattr(self.app_context.orchestrator, "scanner", None)
+            if scanner and hasattr(scanner, "retrieve_tier_data"):
+                td = scanner.retrieve_tier_data()
+                tier_data = td[0] if isinstance(td, tuple) and td else td
+        if tier_data is None and hasattr(self, "draft"):
+            tier_data = getattr(self.draft, "tier_data", None)
 
         for idx, card in enumerate(card_list):
             row_values = DynamicTreeviewManager.format_row_values(
@@ -1094,25 +1103,11 @@ class SealedStudioWindow(tb.Toplevel):
 
     def _load_canvas_image(self, card, canvas, x, y, w, h, tags, overlay_tag, text_id):
         name = card.get("name")
-        urls = card.get("image", [])
-        if not urls and name in constants.BASIC_LANDS:
-            import urllib.parse
-
-            urls = [
-                f"https://api.scryfall.com/cards/named?exact={urllib.parse.quote(name)}&format=image"
-            ]
-        if not urls:
+        img_url = CardImageLoader.resolve_card_url(card)
+        if not img_url:
             return
 
-        img_url = urls[0]
-        if img_url.startswith("/static"):
-            img_url = f"https://www.17lands.com{img_url}"
-        elif "scryfall" in img_url and "format=image" not in img_url:
-            img_url = img_url.replace("/small/", "/large/").replace(
-                "/normal/", "/large/"
-            )
-
-        cache_key = hashlib.md5(img_url.encode("utf-8")).hexdigest()
+        cache_key = hashlib.md5(CardImageLoader.normalize_url(img_url).encode("utf-8")).hexdigest()
 
         if cache_key in self.image_cache:
             if canvas.winfo_exists():
@@ -1127,55 +1122,36 @@ class SealedStudioWindow(tb.Toplevel):
                     canvas.tag_raise(t)
             return
 
-        def fetch():
-            cache_dir = os.path.join(constants.TEMP_FOLDER, "Images")
-            os.makedirs(cache_dir, exist_ok=True)
-            cache_path = os.path.join(cache_dir, f"{cache_key}.jpg")
-            try:
-                if os.path.exists(cache_path):
-                    with open(cache_path, "rb") as f:
-                        img_data = f.read()
-                else:
-                    r = requests.get(
-                        img_url, headers={"User-Agent": "MTGADraftTool/5.0"}, timeout=8
-                    )
-                    r.raise_for_status()
-                    img_data = r.content
-                    with open(cache_path, "wb") as f:
-                        f.write(img_data)
-
-                img = Image.open(io.BytesIO(img_data))
-                img.thumbnail((w, h), Image.Resampling.LANCZOS)
-
+        def on_image_loaded(im):
+            if im is not None:
                 def apply_img():
                     if canvas.winfo_exists():
-                        tk_img = ImageTk.PhotoImage(img)
+                        tk_img = ImageTk.PhotoImage(im)
                         self.image_cache[cache_key] = tk_img
                         canvas.create_image(x, y, image=tk_img, anchor="nw", tags=tags)
                         canvas.delete(
                             text_id
-                        )  # Delete the placeholder text since the actual art is available
-                        # Raise ONLY the stat box above the image
+                        )
                         for t in canvas.find_withtag(overlay_tag):
                             canvas.tag_raise(t)
 
-                self.after(0, apply_img)
-            except Exception:
-                # Tell user image loading failed
-                if canvas.winfo_exists():
-                    try:
+                try:
+                    self.after(0, apply_img)
+                except Exception:
+                    pass
+            else:
+                def apply_err():
+                    if canvas.winfo_exists():
+                        canvas.itemconfigure(
+                            text_id, text=f"{name}\n(Image Unavailable)"
+                        )
 
-                        def apply_err():
-                            if canvas.winfo_exists():
-                                canvas.itemconfigure(
-                                    text_id, text=f"{name}\n(Image Unavailable)"
-                                )
+                try:
+                    self.after(0, apply_err)
+                except Exception:
+                    pass
 
-                        self.after(0, apply_err)
-                    except RuntimeError:
-                        pass
-
-        self.image_executor.submit(fetch)
+        CardImageLoader.load_image_async(img_url, (w, h), on_image_loaded)
 
     def _update_hud(self, main_deck):
         metrics = get_deck_metrics(main_deck)

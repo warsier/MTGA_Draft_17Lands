@@ -108,17 +108,55 @@ class CustomDeckPanel(ttk.Frame):
         self.notebook.select(self.builder_tab)
 
     def refresh(self):
-        """Appends newly drafted cards to the sideboard."""
+        """Appends newly drafted cards to the sideboard with pool fingerprint tracking."""
         raw_pool = self.draft.retrieve_taken_cards()
         if not raw_pool:
-            self.deck_list = []
-            self.sb_list = []
-            self.known_pool_size = 0
-            self._update_tables()
+            self._clear_table()
             self._update_basics_toolbar()
             return
 
-        if len(raw_pool) > self.known_pool_size:
+        scanner = getattr(self, "scanner", getattr(self.draft, "scanner", None))
+        current_event = getattr(scanner, "event_string", "") if scanner else ""
+        current_draft_id = getattr(scanner, "current_draft_id", "") if scanner else ""
+        set_data = getattr(scanner, "set_data", None) if scanner else None
+        current_dataset_id = id(set_data) if set_data else None
+
+        pool_fingerprint = (
+            current_event,
+            current_draft_id,
+            len(raw_pool),
+            tuple(sorted(str(c.get("name", "")) for c in raw_pool)),
+        )
+
+        last_fp = getattr(self, "_last_pool_fingerprint", None)
+        last_ds_id = getattr(self, "_last_dataset_id", None)
+
+        if last_fp is not None and (last_fp[0] != pool_fingerprint[0] or last_fp[1] != pool_fingerprint[1]):
+            self._clear_table()
+            self.known_pool_size = 0
+
+        self._last_pool_fingerprint = pool_fingerprint
+
+        if last_ds_id is not None and last_ds_id != current_dataset_id and set_data:
+            self._last_dataset_id = current_dataset_id
+            name_to_card = {c.get("name"): c for c in raw_pool if c.get("name")}
+            for c in self.deck_list:
+                if c.get("name") in name_to_card:
+                    cnt = c.get("count", 1)
+                    c.update(dict(name_to_card[c["name"]]))
+                    c["count"] = cnt
+            for c in self.sb_list:
+                if c.get("name") in name_to_card:
+                    cnt = c.get("count", 1)
+                    c.update(dict(name_to_card[c["name"]]))
+                    c["count"] = cnt
+            self._update_tables()
+            self._render_deck_stats()
+            return
+
+        self._last_dataset_id = current_dataset_id
+
+        if len(raw_pool) > self.known_pool_size or (last_fp is not None and last_fp != pool_fingerprint):
             stacked_pool = stack_cards(raw_pool)
 
             for pool_card in stacked_pool:
@@ -403,10 +441,10 @@ class CustomDeckPanel(ttk.Frame):
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
     def _clear_table(self):
-        table = getattr(self, "table", None)
-        if table:
-            for item in table.get_children():
-                table.delete(item)
+        main_table = getattr(self, "main_table", None)
+        if main_table:
+            for item in main_table.get_children():
+                main_table.delete(item)
 
         sb_table = getattr(self, "sb_table", None)
         if sb_table:
@@ -426,14 +464,15 @@ class CustomDeckPanel(ttk.Frame):
         if hasattr(self, "_clear_sample_hand"):
             self._clear_sample_hand()
 
-        self.current_deck_list = []
-        self.current_sb_list = []
+        self.deck_list = []
+        self.sb_list = []
+        self.known_pool_size = 0
 
         notebook = getattr(self, "notebook", None)
-        deck_frame = getattr(self, "deck_frame", None)
-        if notebook and deck_frame:
+        builder_tab = getattr(self, "builder_tab", None)
+        if notebook and builder_tab:
             try:
-                notebook.tab(deck_frame, text=" MAIN DECK (0) ")
+                notebook.tab(builder_tab, text=" MAIN DECK (0) ")
             except Exception:
                 pass
 

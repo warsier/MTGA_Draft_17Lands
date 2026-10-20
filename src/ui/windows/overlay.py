@@ -354,6 +354,8 @@ class CompactOverlay(tb.Toplevel):
         recommendations=None,
         picked_cards=None,
         scores=None,
+        deck_metrics=None,
+        **kwargs,
     ):
         evt = self.app_context.vars["selected_event"].get()
         grp = self.app_context.vars["selected_group"].get()
@@ -401,7 +403,8 @@ class CompactOverlay(tb.Toplevel):
         self.signal_meter.update_values(scores if scores is not None else {})
 
         if taken_cards:
-            deck_metrics = get_deck_metrics(taken_cards)
+            if deck_metrics is None:
+                deck_metrics = get_deck_metrics(taken_cards)
             self.curve_plot.update_curve(deck_metrics.distribution_all)
 
             type_counts = {

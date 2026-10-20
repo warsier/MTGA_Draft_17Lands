@@ -442,9 +442,11 @@ class TopBarControls(ttk.Frame):
                     clear_deck_cache()
                 except Exception as e:
                     logger.error(f"Dataset load error: {e}")
+                finally:
+                    if hasattr(self.app, "loading_overlay"):
+                        self.app.loading_overlay.hide()
 
                 self.app.vars["status_text"].set("Ready")
                 self.update_data_sources()
                 self.update_deck_filter_options()
                 self.app.orchestrator.request_math_update()
-                self.app._refresh_ui_data()

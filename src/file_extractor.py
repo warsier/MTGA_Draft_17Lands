@@ -46,20 +46,6 @@ def initialize_card_data(card_data):
         card_data[constants.DATA_FIELD_NAME] = "Unknown Card"
 
 
-def check_set_data(set_data, ratings_data):
-    """Run through 17Lands card list and determine if there are any cards missing from the assembled set file"""
-    try:
-        local_names = {
-            v[constants.DATA_FIELD_NAME].replace("///", "//") for v in set_data.values()
-        }
-
-        for rated_card in ratings_data:
-            if rated_card not in local_names:
-                logger.error("Card %s Missing", rated_card)
-    except Exception as error:
-        logger.error(error)
-
-
 def decode_mana_cost(encoded_cost):
     """Parse the raw card mana_cost field and return the cards cmc and color identity list"""
     decoded_cost = ""
@@ -596,56 +582,6 @@ class FileExtractor(UIProgress):
                 self.combined_data["card_ratings"][arena_id] = local_card
 
         return len(matched_names), len(deep_ratings)
-
-    def _download_expansion(self, database_size):
-        """Function that performs the following steps:
-        1. Build a card data file from local Arena files (stored as temp_card_data.json in the Temp folder)
-           - The card sets contains the Arena IDs, card name, mana cost, colors, etc.
-        1A. Collect the card data from Scryfall if it's unavailable locally (fallback)
-        2. Collect the card_ratings data from scryfall
-        3. Build a set file by combining the card data and the card ratings
-        """
-        result = False
-        result_string = ""
-        temp_size = 0
-        try:
-            while True:
-                self._update_progress(5, True)
-                result, result_string, temp_size = self._retrieve_local_arena_data(
-                    database_size
-                )
-                if not result:
-                    break
-
-                self._update_progress(10, True)
-                self._update_status("Collecting 17Lands Data")
-
-                if not self.retrieve_17lands_data(
-                    self.selected_sets.seventeenlands, self.deck_colors
-                ):
-                    result = False
-                    result_string = "Couldn't Collect 17Lands Data"
-                    break
-
-                matching_only = (
-                    True
-                    if constants.SET_SELECTION_ALL in self.selected_sets.arena
-                    else False
-                )
-
-                if not matching_only:
-                    self._initialize_17lands_data()
-
-                self._update_status("Building Data Set File")
-                self._assemble_set(matching_only)
-                check_set_data(self.combined_data["card_ratings"], self.card_ratings)
-                break
-
-        except Exception as error:
-            logger.error(error)
-            result_string = error
-
-        return result, result_string, temp_size
 
     def _retrieve_local_arena_data(self, previous_database_size):
         """Builds a card data file from raw Arena files"""
@@ -1212,56 +1148,6 @@ class FileExtractor(UIProgress):
 
         return result
 
-    def _initialize_17lands_data(self):
-        """Initialize the 17Lands data by setting the fields to 0 in case there are gaps in the downloaded card data"""
-        for data in self.card_dict.values():
-            initialize_card_data(data)
-
-    def retrieve_17lands_data(self, sets, deck_colors):
-        """Use the 17Lands endpoint to download the card ratings data for all of the deck filter options"""
-        self.card_ratings = {}
-        current_progress = 0
-        result = False
-        seventeenlands = Seventeenlands()
-        for set_code in sets:
-            for color in deck_colors:
-                retry = constants.CARD_RATINGS_ATTEMPT_MAX
-                result = False
-                while retry:
-                    try:
-                        # safe_set_code = quote(set_code, safe='')
-                        # url = f"https://www.17lands.com/card_ratings/data?expansion={safe_set_code}&format={self.draft}&start_date={self.start_date}&end_date={self.end_date}{user_group}"
-                        self._update_status(f"Collecting {color} 17Lands Data")
-                        seventeenlands.download_card_ratings(
-                            set_code,
-                            color,
-                            self.draft,
-                            self.time_period,
-                            self.user_group,
-                            self.card_ratings,
-                        )
-                        result = True
-                        break
-                    except Exception as error:
-                        logger.error(error)
-                        retry -= 1
-
-                        if retry:
-                            attempt_count = constants.CARD_RATINGS_ATTEMPT_MAX - retry
-                            self._update_status(
-                                f"""Collecting {color} 17Lands Data - Request Failed ({attempt_count}/{constants.CARD_RATINGS_ATTEMPT_MAX}) - Retry in {constants.CARD_RATINGS_BACKOFF_DELAY_SECONDS} seconds"""
-                            )
-                            time.sleep(constants.CARD_RATINGS_BACKOFF_DELAY_SECONDS)
-
-                if result:
-                    current_progress = 3 / len(self.selected_sets.seventeenlands)
-                    self._update_progress(current_progress, True)
-                else:
-                    break
-                time.sleep(constants.CARD_RATINGS_INTER_DELAY_SECONDS)
-
-        return result
-
     def _inject_community_tags(self, progress_callback=None):
         """Fetches Scryfall otags and injects them into the card dictionary."""
         set_code = (
@@ -1280,15 +1166,6 @@ class FileExtractor(UIProgress):
                 card["tags"] = harvested_tags.get(card_name, [])
 
         return errors
-
-    def _assemble_set(self, matching_only):
-        """Combine the 17Lands ratings and the card data to form the complete set data"""
-        self.combined_data["card_ratings"] = {}
-        for card, card_data in self.card_dict.items():
-            if self._process_card_data(card_data):
-                self.combined_data["card_ratings"][card] = card_data
-            elif not matching_only:
-                self.combined_data["card_ratings"][card] = card_data
 
     def retrieve_17lands_color_ratings(self):
         """Use 17Lands endpoint to collect the data from the color_ratings page"""
@@ -1316,14 +1193,16 @@ class FileExtractor(UIProgress):
                 logger.error(f"Color Ratings Error: {error}")
                 result = False
 
+                status_code = getattr(getattr(error, "response", None), "status_code", None)
+
                 # If we are hard-blocked by 17Lands, do not hammer the server with retries
-                if "429" in str(error) or "403" in str(error):
+                if status_code in (429, 403) or "429" in str(error) or "403" in str(error):
                     break
 
                 # If 17Lands returns a 404 or 400, it means the set data doesn't exist yet (e.g. Day 1 release)
                 # We should NOT fail. We should proceed to build the local MTGA card data so the App
                 # can still function with Tier Lists and card tooltips!
-                if "404" in str(error) or "400" in str(error):
+                if status_code in (404, 400) or "404" in str(error) or "400" in str(error):
                     self.combined_data["color_ratings"] = {}
                     self.set_game_count(0)
                     result = True
@@ -1347,41 +1226,6 @@ class FileExtractor(UIProgress):
             logger.error("Failed to download Color Ratings after multiple attempts.")
 
         return result, game_count
-
-    def _process_card_data(self, card):
-        """Link the 17Lands card ratings with the card data"""
-        result = False
-        try:
-            card_name = card[constants.DATA_FIELD_NAME].replace("///", "//")
-            matching_cards = [x for x in self.card_ratings if x == card_name]
-            if matching_cards:
-                ratings_card_name = matching_cards[0]
-                deck_colors = self.card_ratings[ratings_card_name][
-                    constants.DATA_SECTION_RATINGS
-                ]
-
-                card[constants.DATA_SECTION_IMAGES] = self.card_ratings[
-                    ratings_card_name
-                ][constants.DATA_SECTION_IMAGES]
-                card[constants.DATA_FIELD_DECK_COLORS] = {}
-                for color in self.deck_colors:
-                    card[constants.DATA_FIELD_DECK_COLORS][color] = {
-                        x: 0.0
-                        for x in constants.DATA_FIELD_17LANDS_DICT
-                        if x != constants.DATA_SECTION_IMAGES
-                    }
-                result = True
-                for deck_color in deck_colors:
-                    for key, value in deck_color.items():
-                        for field in value:
-                            card[constants.DATA_FIELD_DECK_COLORS][key][field] = value[
-                                field
-                            ]
-
-        except Exception as error:
-            logger.error(error)
-
-        return result
 
     def export_card_data(self):
         """Validate a staged dataset before atomically replacing the saved copy."""

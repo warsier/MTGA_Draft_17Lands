@@ -88,6 +88,9 @@ class DashboardFrame(ttk.Frame):
 
     def _on_resize(self, event):
         if event.widget == self:
+            if getattr(self, "_last_dash_width", None) == event.width:
+                return
+            self._last_dash_width = event.width
             if event.width > 100:
                 wrap_len = min(550, max(300, event.width - 60))
                 for lbl in self._dynamic_wrap_labels:
@@ -265,10 +268,10 @@ class DashboardFrame(ttk.Frame):
         )
         self.recap_screen.grid(row=0, column=0, sticky="nsew")
 
-    def update_pool_summary(self, taken_cards, metrics, draft_id=""):
+    def update_pool_summary(self, taken_cards, metrics, draft_id="", deck_metrics=None):
         if self.recap_screen:
             self.recap_screen.update_summary(
-                taken_cards, metrics, draft_id, self._current_event_type
+                taken_cards, metrics, draft_id, self._current_event_type, deck_metrics=deck_metrics
             )
 
     def _build_active_state(self):
@@ -423,6 +426,9 @@ class DashboardFrame(ttk.Frame):
                     self._sidebar_canvas.yview_moveto(0)
 
         def _on_sidebar_resize(event):
+            if getattr(self, "_last_sb_width", None) == event.width:
+                return
+            self._last_sb_width = event.width
             self._sidebar_canvas.itemconfig(
                 self._sidebar_canvas_window, width=event.width
             )
@@ -577,7 +583,7 @@ class DashboardFrame(ttk.Frame):
             self.recovery_frame.grid_remove()
 
         if not has_any_datasets:
-            pass
+            self.no_data_frame.grid(row=0, column=0, sticky="nsew")
         elif has_draft_data:
             if show_recovery:
                 self.recovery_frame.grid(row=0, column=0, sticky="nsew")

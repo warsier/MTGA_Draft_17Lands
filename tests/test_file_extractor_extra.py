@@ -5,66 +5,6 @@ from src.file_extractor import FileExtractor
 from src.utils import Result
 
 
-def test_retrieve_17lands_data_success():
-    extractor = FileExtractor(None, MagicMock(), MagicMock(), MagicMock())
-    extractor.draft = "PremierDraft"
-    extractor.start_date = "2020-01-01"
-    extractor.end_date = "2020-02-01"
-    extractor.user_group = "All"
-    extractor.selected_sets = MagicMock(seventeenlands=["M10"])
-
-    with patch("src.file_extractor.Seventeenlands") as mock_sl:
-        mock_instance = mock_sl.return_value
-        mock_instance.download_card_ratings.return_value = None
-
-        result = extractor.retrieve_17lands_data(["M10"], ["All Decks"])
-        assert result is True
-        mock_instance.download_card_ratings.assert_called_once()
-
-
-def test_retrieve_17lands_data_fail():
-    extractor = FileExtractor(None, MagicMock(), MagicMock(), MagicMock())
-    extractor.draft = "PremierDraft"
-    extractor.start_date = "2020-01-01"
-    extractor.end_date = "2020-02-01"
-    extractor.user_group = "All"
-    extractor.selected_sets = MagicMock(seventeenlands=["M10"])
-
-    with patch("src.file_extractor.Seventeenlands") as mock_sl:
-        mock_instance = mock_sl.return_value
-        mock_instance.download_card_ratings.side_effect = Exception("API Error")
-
-        with patch("src.constants.CARD_RATINGS_ATTEMPT_MAX", 1):
-            with patch("src.file_extractor.time.sleep"):
-                result = extractor.retrieve_17lands_data(["M10"], ["All Decks"])
-                assert result is False
-
-
-@patch(
-    "src.file_extractor.FileExtractor._retrieve_local_arena_data",
-    return_value=(True, "OK", 100),
-)
-@patch("src.file_extractor.FileExtractor.retrieve_17lands_data", return_value=True)
-@patch("src.file_extractor.FileExtractor._assemble_set")
-def test_download_expansion(mock_assemble, mock_17lands, mock_local):
-    from src.file_extractor import FileExtractor
-
-    extractor = FileExtractor(None, MagicMock(), MagicMock(), MagicMock())
-    extractor.selected_sets = MagicMock(seventeenlands=["M10"])
-    extractor.draft = "PremierDraft"
-    extractor.start_date = "2020-01-01"
-    extractor.end_date = "2020-02-01"
-    extractor.user_group = "All"
-
-    # We use patch on time.sleep to make the while loop execution instant
-    with patch("time.sleep"):
-        res, msg, size = extractor._download_expansion(0)
-
-    assert res is True
-    assert size == 100
-    mock_assemble.assert_called_once()
-
-
 @patch("src.file_extractor.os.path.exists", return_value=True)
 @patch("src.file_extractor.open", new_callable=MagicMock)
 def test_retrieve_stored_data(mock_open, mock_exists):
@@ -96,21 +36,6 @@ def test_retrieve_stored_data(mock_open, mock_exists):
     assert res2 is True
     assert "1001" in extractor.card_dict
     assert "2002" in extractor.card_dict
-
-
-def test_initialize_17lands_data():
-    """Verify that card items without 17Lands metrics are populated with default 0.0 metrics to prevent UI KeyErrors."""
-    from src.file_extractor import FileExtractor
-    from src.constants import DATA_FIELD_DECK_COLORS
-
-    extractor = FileExtractor(None, MagicMock(), MagicMock(), MagicMock())
-    extractor.card_dict = {"1001": {"name": "Bolt", "cmc": 1}}
-
-    extractor._initialize_17lands_data()
-
-    assert DATA_FIELD_DECK_COLORS in extractor.card_dict["1001"]
-    assert "All Decks" in extractor.card_dict["1001"][DATA_FIELD_DECK_COLORS]
-    assert extractor.card_dict["1001"]["types"] == []
 
 
 @patch("src.utils.invalidate_local_set_cache")
@@ -175,45 +100,6 @@ def test_failed_export_preserves_previous_dataset(failure, tmp_path, monkeypatch
         invalidate.assert_not_called()
     assert destination.read_bytes() == b"previous dataset"
     assert list(tmp_path.iterdir()) == [destination]
-
-
-@patch(
-    "src.file_extractor.FileExtractor._retrieve_local_arena_data",
-    return_value=(False, "Failed", 0),
-)
-def test_download_expansion_local_fail(mock_local):
-    """Verify that failing to retrieve local data stops the expansion download."""
-    from src.file_extractor import FileExtractor
-
-    extractor = FileExtractor(None, MagicMock(), MagicMock(), MagicMock())
-    extractor.selected_sets = MagicMock(seventeenlands=["M10"])
-
-    res, msg, size = extractor._download_expansion(0)
-    assert res is False
-    assert msg == "Failed"
-
-
-@patch(
-    "src.file_extractor.FileExtractor._retrieve_local_arena_data",
-    return_value=(True, "Success", 100),
-)
-@patch("src.file_extractor.FileExtractor.retrieve_17lands_data", return_value=False)
-def test_download_expansion_17lands_fail(mock_17lands, mock_local):
-    """Verify that failing to retrieve 17Lands data stops the expansion download."""
-    from src.file_extractor import FileExtractor
-
-    extractor = FileExtractor(None, MagicMock(), MagicMock(), MagicMock())
-    extractor.selected_sets = MagicMock(seventeenlands=["M10"])
-
-    res, msg, size = extractor._download_expansion(0)
-    assert res is False
-    assert msg == "Couldn't Collect 17Lands Data"
-
-
-def test_check_set_data():
-    from src.file_extractor import check_set_data
-
-    check_set_data({"1": {"name": "Bolt"}}, ["Bolt", "Shock"])
 
 
 def test_search_arena_log_locations_manual():

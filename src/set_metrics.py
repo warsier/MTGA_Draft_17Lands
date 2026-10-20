@@ -24,29 +24,8 @@ class SetMetrics:
     def __init__(self, dataset: Dataset, digits: int = 2):
         self._color_metrics: dict = {}
         self._digits: int = digits
-        self.format_texture: dict = {}
-        self.generate_metrics(dataset)
-        self._build_format_texture(dataset)
-
-    def _build_format_texture(self, dataset: Dataset) -> None:
-        """
-        Analyzes the set to determine the scarcity of specific roles (Removal, 2-Drops, etc.)
-        Only counts 'Playable' Commons and Uncommons (GIHWR > baseline).
-        """
-        if not dataset:
-            return
-
-        baseline_wr, std = self.get_metrics("All Decks", "gihwr")
-        if baseline_wr == 0.0:
-            return
-
-        # A card is "playable" if it's within 1 standard deviation of the mean
-        playable_threshold = baseline_wr - std
-
         from src.constants import CARD_COLORS
-
-        # Initialize texture map
-        self.format_texture = {
+        self.format_texture: dict = {
             c: {
                 "removal": 0,
                 "2-drop": 0,
@@ -56,46 +35,10 @@ class SetMetrics:
             }
             for c in CARD_COLORS
         }
+        self._precompute_all(dataset)
 
-        dataset_dict = dataset.get_card_ratings()
-        if not dataset_dict:
-            return
-
-        for card in dataset_dict.values():
-            rarity = str(card.get("rarity", "common")).lower()
-            if rarity not in ["common", "uncommon"]:
-                continue
-
-            gihwr = float(
-                card.get("deck_colors", {}).get("All Decks", {}).get("gihwr", 0.0)
-            )
-            if gihwr < playable_threshold:
-                continue
-
-            colors = card.get("colors", [])
-            # Skip colorless or 3+ color cards for raw texture counting to keep it focused on base colors
-            if not colors or len(colors) > 2:
-                continue
-
-            tags = card.get("tags", [])
-            cmc = int(card.get("cmc", 0))
-            types = card.get("types", [])
-
-            is_2_drop = "Creature" in types and cmc <= 2
-
-            for color in colors:
-                if color not in self.format_texture:
-                    continue
-                if is_2_drop:
-                    self.format_texture[color]["2-drop"] += 1
-                if "removal" in tags:
-                    self.format_texture[color]["removal"] += 1
-                if "evasion" in tags:
-                    self.format_texture[color]["evasion"] += 1
-                if "fixing_ramp" in tags:
-                    self.format_texture[color]["fixing_ramp"] += 1
-                if "card_advantage" in tags:
-                    self.format_texture[color]["card_advantage"] += 1
+    def _build_format_texture(self, dataset: Dataset) -> None:
+        pass  # Handled inside _precompute_all
 
     def get_metrics(self, color: str, field: str) -> Tuple[float, float]:
         """
@@ -107,7 +50,7 @@ class SetMetrics:
             mean = self._color_metrics[field][color].mean
             std = self._color_metrics[field][color].std
 
-        return round(mean, self._digits), round(std, self._digits)
+        return mean, std
 
     def get_sample_count(self, color: str, field: str) -> int:
         """Number of distinct cards that contributed to get_metrics(color, field)."""
@@ -126,9 +69,11 @@ class SetMetrics:
         return percentile
 
     def generate_metrics(self, dataset: Dataset) -> None:
+        self._precompute_all(dataset)
+
+    def _precompute_all(self, dataset: Dataset) -> None:
         """
-        Calculate the mean and standard deviation for all of the supported colors and win rate fields
-        in a single fast pass over the dataset.
+        Calculate mean/std and format texture in a single deduplicated pass.
         """
         if not dataset:
             return
@@ -145,11 +90,13 @@ class SetMetrics:
         from src.utils import normalize_color_string
 
         processed_cards = set()
+        unique_card_list = []
         for card_data in dataset_dict.values():
             card_name = card_data.get(DATA_FIELD_NAME)
             if not card_name or card_name in processed_cards:
                 continue
             processed_cards.add(card_name)
+            unique_card_list.append(card_data)
 
             deck_stats = card_data.get(DATA_FIELD_DECK_COLORS, {})
             if not deck_stats:
@@ -173,9 +120,44 @@ class SetMetrics:
                 vals = values_by_field_color[field][color]
                 if vals:
                     metrics.count = len(vals)
-                    metrics.mean = stats.mean(vals)
-                    metrics.std = stats.pstdev(vals)
+                    metrics.mean = round(stats.mean(vals), self._digits)
+                    metrics.std = round(stats.pstdev(vals), self._digits)
                 self._color_metrics[field][color] = metrics
+
+        # Single-pass texture calculation using the already-deduplicated card list
+        baseline_wr, std = self.get_metrics("All Decks", "gihwr")
+        if baseline_wr > 0.0:
+            playable_threshold = baseline_wr - std
+            for card in unique_card_list:
+                rarity = str(card.get("rarity", "common")).lower()
+                if rarity not in ["common", "uncommon"]:
+                    continue
+                gihwr = float(
+                    card.get("deck_colors", {}).get("All Decks", {}).get("gihwr", 0.0)
+                )
+                if gihwr < playable_threshold:
+                    continue
+                colors = card.get("colors", [])
+                if not colors or len(colors) > 2:
+                    continue
+                tags = card.get("tags", [])
+                cmc = int(card.get("cmc", 0))
+                types = card.get("types", [])
+                is_2_drop = "Creature" in types and cmc <= 2
+
+                for color in colors:
+                    if color not in self.format_texture:
+                        continue
+                    if is_2_drop:
+                        self.format_texture[color]["2-drop"] += 1
+                    if "removal" in tags:
+                        self.format_texture[color]["removal"] += 1
+                    if "evasion" in tags:
+                        self.format_texture[color]["evasion"] += 1
+                    if "fixing_ramp" in tags:
+                        self.format_texture[color]["fixing_ramp"] += 1
+                    if "card_advantage" in tags:
+                        self.format_texture[color]["card_advantage"] += 1
 
     def generate_color_metrics(
         self, color: str, field: str, dataset: Dataset
@@ -225,7 +207,7 @@ class SetMetrics:
             return metrics
 
         metrics.count = len(unique_gihwr)
-        metrics.mean = stats.mean(unique_gihwr)
-        metrics.std = stats.pstdev(unique_gihwr)
+        metrics.mean = round(stats.mean(unique_gihwr), self._digits)
+        metrics.std = round(stats.pstdev(unique_gihwr), self._digits)
 
         return metrics

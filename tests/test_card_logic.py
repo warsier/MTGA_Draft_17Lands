@@ -130,12 +130,9 @@ def test_export_draft_to_csv():
 
     # Mock Dataset
     mock_dataset = MagicMock()
-    # History has ["123", "789"].
-    # Call 1: "123" -> returns Card A
-    # Call 2: "789" -> returns Card B
-    mock_dataset.get_data_by_id.side_effect = [
-        [{constants.DATA_FIELD_NAME: "Card A", constants.DATA_FIELD_CMC: 2}],
-        [{constants.DATA_FIELD_NAME: "Card B", constants.DATA_FIELD_CMC: 3}],
+    mock_dataset.get_data_by_id.return_value = [
+        {constants.DATA_FIELD_NAME: "Card A", constants.DATA_FIELD_CMC: 2, "arena_id": "123"},
+        {constants.DATA_FIELD_NAME: "Card B", constants.DATA_FIELD_CMC: 3, "arena_id": "789"},
     ]
 
     csv_output = export_draft_to_csv(history, mock_dataset, picked_cards)

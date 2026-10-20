@@ -37,7 +37,6 @@ from src.log_scanner import ArenaScanner
 from src.dataset_selection import select_event_dataset
 from src.utils import Result
 from src.file_extractor import search_arena_log_locations, retrieve_arena_directory
-from src.ui.app import DraftApp
 from src.ui.windows.splash import SplashWindow
 from src.ui.styles import Theme
 
@@ -128,6 +127,7 @@ def load_data(args, config, progress_callback):
             from src.dataset_updater import DatasetUpdater
 
             DatasetUpdater(config).sync_datasets(progress_callback)
+            config._synced_on_boot = True
 
             config.settings.last_run_version = constants.APPLICATION_VERSION
             write_configuration(config)
@@ -136,6 +136,7 @@ def load_data(args, config, progress_callback):
 
             updater = DatasetUpdater(config)
             updater.sync_datasets(progress_callback)
+            config._synced_on_boot = True
         else:
             progress_callback("Cloud sync disabled by user...")
 
@@ -283,6 +284,7 @@ def main():
             try:
                 splash.close()
                 root.update()
+                from src.ui.app import DraftApp
                 app = DraftApp(root, data["scanner"], data["config"])
 
                 # 1. Show the window skeleton immediately
@@ -323,3 +325,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def __getattr__(name):
+    if name == "DraftApp":
+        from src.ui.app import DraftApp
+        return DraftApp
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

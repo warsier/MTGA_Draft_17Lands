@@ -7,6 +7,8 @@ import itertools
 import re
 from src import constants
 
+PIP_PATTERN = re.compile(r"\{(.*?)\}")
+
 
 def calculate_dynamic_mana_base(spells, non_basic_lands, colors, forced_count=17):
     if forced_count <= 0:
@@ -30,7 +32,7 @@ def calculate_dynamic_mana_base(spells, non_basic_lands, colors, forced_count=17
         cost, cmc = card.get("mana_cost", ""), int(card.get("cmc", 99) or 99)
 
         if cost:
-            pips = re.findall(r"\{(.*?)\}", cost)
+            pips = PIP_PATTERN.findall(cost)
             card_color_pips = {c: 0 for c in constants.CARD_COLORS}
             card_hybrid_pips = []
             for pip in pips:
@@ -119,7 +121,8 @@ def calculate_dynamic_mana_base(spells, non_basic_lands, colors, forced_count=17
         effective_spell_fixers = max(
             0, any_color_spells - any_color_enabler_pips.get(c, 0)
         )
-        effective_any = any_color_lands + min(2, effective_spell_fixers // 2)
+        spell_specific = analyzer.spell_fixing_sources.get(c, 0)
+        effective_any = any_color_lands + min(2, effective_spell_fixers // 2) + int(spell_specific * 0.5 + 0.5)
         provided = existing_sources.get(c, 0) + effective_any
         deficit = targets[c] - provided
 
@@ -210,7 +213,7 @@ def is_castable(card, colors, strict=True):
         return True
     if strict:
         if mana_cost:
-            for pip in re.findall(r"\{(.*?)\}", mana_cost):
+            for pip in PIP_PATTERN.findall(mana_cost):
                 options = pip.split("/")
                 if any(opt.isdigit() or opt in ["X", "C"] for opt in options):
                     continue
@@ -248,6 +251,7 @@ class ManaSourceAnalyzer:
         # mana base math.
         self.any_color_land_sources = 0
         self.any_color_spell_sources = 0
+        self.spell_fixing_sources = {c: 0 for c in constants.CARD_COLORS}
         self.any_color_enabler_pips = {c: 0 for c in constants.CARD_COLORS}
         self.total_fixing_cards = 0
         for card in self.pool:
@@ -272,7 +276,10 @@ class ManaSourceAnalyzer:
         specific_match_found = False
         for phrase, color_sym in self.SPECIFIC_FIXING_MAP.items():
             if phrase in text:
-                self.sources[color_sym] += count
+                if is_land:
+                    self.sources[color_sym] += count
+                else:
+                    self.spell_fixing_sources[color_sym] += count
                 self.total_fixing_cards += count
                 specific_match_found = True
 
@@ -328,9 +335,11 @@ class ManaSourceAnalyzer:
 def count_fixing(pool):
     analyzer = ManaSourceAnalyzer(pool)
     return {
-        c: analyzer.sources[c] + analyzer.any_color_sources
+        c: analyzer.sources[c] + analyzer.spell_fixing_sources.get(c, 0) + analyzer.any_color_sources
         for c in constants.CARD_COLORS
     }
+
+allocate_lands = calculate_dynamic_mana_base
 
 
 def get_strict_colors(spells):
@@ -342,7 +351,7 @@ def get_strict_colors(spells):
                 if c in pips:
                     pips[c] += 1
             continue
-        for pip in re.findall(r"\{(.*?)\}", cost):
+        for pip in PIP_PATTERN.findall(cost):
             if any(ch.isdigit() or ch in ["X", "C"] for ch in pip.split("/")):
                 continue
             options = [c for c in pip.split("/") if c in constants.CARD_COLORS]
@@ -455,22 +464,19 @@ def brute_force_mana_base(spells, non_basic_lands, colors, forced_count=17):
         return baseline_basics
 
     # 3. Simulate all valid permutations
-    from src.advisor.simulator import simulate_deck  # Local import to prevent loops
+    from src.advisor.simulator import (
+        simulate_deck,
+        parse_base_deck_to_arrays,
+        simulate_permutation,
+    )  # Local import to prevent loops
 
     best_score = -9999
     best_perm = valid_permutations[0]
     base_deck = spells + non_basic_lands
+    base_arrays = parse_base_deck_to_arrays(base_deck)
 
     for perm in valid_permutations:
-        temp_lands = []
-        for c, count in perm.items():
-            if count > 0:
-                temp_lands.extend(create_basic_lands(c, count))
-
-        test_deck = base_deck + temp_lands
-
-        # We only need 2000 iterations to accurately sort permutations
-        stats = simulate_deck(test_deck, iterations=2000)
+        stats = simulate_permutation(base_arrays, perm, iterations=2000)
         if not stats:
             continue
 

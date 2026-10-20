@@ -149,12 +149,15 @@ class SealedSession:
     def load_pool(self, raw_pool: List[Dict]):
         self.master_pool = raw_pool
         self._pool_inventory.clear()
+        self._card_prototypes = {}
 
         for card in raw_pool:
             name = card.get(constants.DATA_FIELD_NAME)
             count = card.get(constants.DATA_FIELD_COUNT, 1)
             if name:
                 self._pool_inventory[name] = self._pool_inventory.get(name, 0) + count
+                if name not in self._card_prototypes:
+                    self._card_prototypes[name] = card
 
         if not self.variants:
             self.create_variant("Build 1")
@@ -251,17 +254,18 @@ class SealedSession:
         sideboard = []
         variant = self.variants[self.active_variant_name]
 
-        card_prototypes = {}
-        for card in self.master_pool:
-            name = card.get(constants.DATA_FIELD_NAME)
-            if name and name not in card_prototypes:
-                card_prototypes[name] = card
+        card_prototypes = getattr(self, "_card_prototypes", None)
+        if card_prototypes is None:
+            card_prototypes = {}
+            for card in self.master_pool:
+                name = card.get(constants.DATA_FIELD_NAME)
+                if name and name not in card_prototypes:
+                    card_prototypes[name] = card
+            self._card_prototypes = card_prototypes
 
         for name, count in variant.main_deck_counts.items():
             if name in card_prototypes:
-                import copy
-
-                card_copy = copy.deepcopy(card_prototypes[name])
+                card_copy = dict(card_prototypes[name])
                 card_copy[constants.DATA_FIELD_COUNT] = count
                 main_deck.append(card_copy)
             elif name in constants.BASIC_LANDS:
@@ -280,9 +284,7 @@ class SealedSession:
             remaining = total_count - used_in_main
 
             if remaining > 0 and name in card_prototypes:
-                import copy
-
-                card_copy = copy.deepcopy(card_prototypes[name])
+                card_copy = dict(card_prototypes[name])
                 card_copy[constants.DATA_FIELD_COUNT] = remaining
                 sideboard.append(card_copy)
 

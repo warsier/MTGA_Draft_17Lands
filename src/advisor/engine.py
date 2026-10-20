@@ -7,7 +7,6 @@ Updated: Bayesian Smoothing, Signal Tie-Breakers, Top-End/Synergy Tracking, and 
 import statistics
 import logging
 import math
-import numpy as np
 import re
 from typing import List, Dict, Any, Tuple
 from src.advisor.schema import Recommendation
@@ -104,14 +103,18 @@ class DraftAdvisor:
         self.base_deck_score = 0.0
         self.color_options = []
         self.base_pair_scores = {}
-        if pack_number >= 3 and len(self.pool) >= 23:
+        self.fixing_sources = getattr(self, "fixing_map", {})
+        if pack_number >= 3 and len(self.pool) >= 15:
             try:
                 from src.card_logic import identify_top_pairs
 
+                self.fixing_sources = count_fixing(self.pool)
                 self.color_options = identify_top_pairs(self.pool, self.metrics)
                 for pair in self.color_options:
                     pair_key = tuple(sorted(pair))
-                    self.base_pair_scores[pair_key] = self._score_pair_deck(self.pool, pair)
+                    self.base_pair_scores[pair_key] = self._score_pair_deck(
+                        self.pool, pair, fixing_sources=self.fixing_sources
+                    )
                 self.base_deck_score = (
                     max(self.base_pair_scores.values()) if self.base_pair_scores else 0.0
                 )
@@ -120,6 +123,7 @@ class DraftAdvisor:
                 self.base_deck_score = 0.0
                 self.color_options = []
                 self.base_pair_scores = {}
+                self.fixing_sources = getattr(self, "fixing_map", {})
 
         recommendations = []
         for card in pack_cards:
@@ -642,7 +646,12 @@ class DraftAdvisor:
         except:
             return 0.0
 
-    def _score_pair_deck(self, pool: List[Dict], main_colors: List[str]) -> float:
+    def _score_pair_deck(
+        self,
+        pool: List[Dict],
+        main_colors: List[str],
+        fixing_sources: Dict[str, int] = None,
+    ) -> float:
         from src.card_logic import (
             build_variant_consistency,
             build_variant_greedy,
@@ -660,7 +669,9 @@ class DraftAdvisor:
                 if score > best:
                     best = score
 
-        deck, splash = build_variant_greedy(pool, main_colors, self.metrics)
+        deck, splash = build_variant_greedy(
+            pool, main_colors, self.metrics, fixing_sources=fixing_sources
+        )
         if deck:
             target_colors = main_colors + [splash] if splash else main_colors
             score, _ = calculate_holistic_score(
@@ -681,14 +692,44 @@ class DraftAdvisor:
         test_pool = self.pool + [candidate_card]
         best_score = 0.0
 
+        is_fixer = (
+            "mana_fixer" in candidate_card.get("tags", [])
+            or "Land" in candidate_card.get("types", [])
+            or "Treasure" in candidate_card.get("oracle_text", "")
+        )
+        test_fixing = (
+            count_fixing(test_pool)
+            if is_fixer
+            else getattr(self, "fixing_sources", getattr(self, "fixing_map", {}))
+        )
+
+        raw_gihwr = float(
+            candidate_card.get("deck_colors", {})
+            .get("All Decks", {})
+            .get("gihwr", 0.0)
+        )
+        z_score = (raw_gihwr - self.global_mean) / max(0.1, self.global_std)
+        is_bomb = z_score >= self.BOMB_Z_SCORE
+
         for pair in self.color_options:
             pair_key = tuple(sorted(pair))
             pair_set = set(pair)
-            # Re-evaluate only if candidate matches pair, is colorless/land, or is single-color splash
-            if not card_colors or card_colors.issubset(pair_set) or len(card_colors) == 1:
-                score = self._score_pair_deck(test_pool, pair)
+            # Re-evaluate only if candidate matches pair, is colorless/land, or is single-color eligible splash
+            should_rebuild = False
+            if not card_colors or card_colors.issubset(pair_set):
+                should_rebuild = True
+            elif len(card_colors) == 1:
+                splash_col = next(iter(card_colors))
+                if splash_col in pair_set or is_bomb or test_fixing.get(splash_col, 0) > 0:
+                    should_rebuild = True
+
+            if should_rebuild:
+                score = self._score_pair_deck(
+                    test_pool, pair, fixing_sources=test_fixing
+                )
             else:
                 score = self.base_pair_scores.get(pair_key, 0.0)
+
             if score > best_score:
                 best_score = score
 

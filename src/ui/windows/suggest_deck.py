@@ -599,8 +599,16 @@ class SuggestDeckPanel(ttk.Frame):
                 )
                 tree._selection_bound = True
 
-            metrics = getattr(self.draft, "set_metrics", None)
-            tier_data = getattr(self.draft, "tier_data", None)
+            metrics = (
+                self.draft.retrieve_set_metrics(False)
+                if hasattr(self.draft, "retrieve_set_metrics")
+                else getattr(self.draft, "set_metrics", None)
+            )
+            tier_data = (
+                self.draft.retrieve_tier_data()[0]
+                if hasattr(self.draft, "retrieve_tier_data")
+                else getattr(self.draft, "tier_data", None)
+            )
             for idx, card in enumerate(source_list):
                 row_values = DynamicTreeviewManager.format_row_values(
                     card,
@@ -633,7 +641,7 @@ class SuggestDeckPanel(ttk.Frame):
         render_deck_stats(
             getattr(self, "stats_frame", None),
             self.current_deck_list,
-            show_subtypes=False,
+            show_subtypes=True,
         )
 
     def _render_deck(self, label: str):

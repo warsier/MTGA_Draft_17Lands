@@ -24,11 +24,15 @@ class DraftRecapScreen(ttk.Frame):
         self.bind("<Configure>", self._on_resize)
 
     def _on_resize(self, event):
-        if event.widget == self and event.width > 100:
-            wrap_len = min(550, max(300, event.width - 60))
-            for lbl in self._dynamic_wrap_labels:
-                if lbl.winfo_exists():
-                    lbl.configure(wraplength=wrap_len)
+        if event.widget == self:
+            if getattr(self, "_last_recap_width", None) == event.width:
+                return
+            self._last_recap_width = event.width
+            if event.width > 100:
+                wrap_len = min(550, max(300, event.width - 60))
+                for lbl in self._dynamic_wrap_labels:
+                    if lbl.winfo_exists():
+                        lbl.configure(wraplength=wrap_len)
 
     def _create_stat_box(self, parent, title, text_var_name):
         frame = ttk.Labelframe(parent, text=title, padding=Theme.scaled_val(8))
@@ -176,7 +180,7 @@ class DraftRecapScreen(ttk.Frame):
             fill="both", expand=True, pady=Theme.scaled_val((0, 10))
         )
 
-    def update_summary(self, taken_cards, metrics, draft_id, event_type):
+    def update_summary(self, taken_cards, metrics, draft_id, event_type, deck_metrics=None):
         if not taken_cards or len(taken_cards) < 40:
             return
 
@@ -388,7 +392,8 @@ class DraftRecapScreen(ttk.Frame):
         )
 
         # 7. CHARTS
-        deck_metrics = get_deck_metrics(taken_cards)
+        if deck_metrics is None:
+            deck_metrics = get_deck_metrics(taken_cards)
         self.recap_curve_plot.update_curve(deck_metrics.distribution_all)
 
         type_counts = {
@@ -427,36 +432,42 @@ class DraftRecapScreen(ttk.Frame):
 
         # 9. 17LANDS API FETCH
         if draft_id:
+            if not hasattr(self, "_record_cache"):
+                self._record_cache = {}
 
-            def fetch_17lands_record():
-                from src.seventeenlands import Seventeenlands
+            def apply_ui(record):
+                if record and record.get("wins") is not None:
+                    w, l = record["wins"], record["losses"]
+                    self.lbl_actual_record.config(
+                        text=f"Actual 17Lands Record: {w} Wins - {l} Losses",
+                        bootstyle=(
+                            "success"
+                            if w >= 3
+                            else ("warning" if w >= 1 else "danger")
+                        ),
+                    )
+                    self.lbl_actual_record.pack(
+                        anchor="center", pady=Theme.scaled_val((5, 0))
+                    )
+                    self.btn_17lands_link.config(
+                        command=lambda: open_file(record["url"])
+                    )
+                    self.btn_17lands_link.pack(
+                        side="right", padx=Theme.scaled_val((0, 10))
+                    )
 
-                record = Seventeenlands().get_draft_record(draft_id)
+            if draft_id in self._record_cache:
+                apply_ui(self._record_cache[draft_id])
+            else:
+                def fetch_17lands_record():
+                    from src.seventeenlands import Seventeenlands
 
-                def apply_ui():
-                    if record and record.get("wins") is not None:
-                        w, l = record["wins"], record["losses"]
-                        self.lbl_actual_record.config(
-                            text=f"Actual 17Lands Record: {w} Wins - {l} Losses",
-                            bootstyle=(
-                                "success"
-                                if w >= 3
-                                else ("warning" if w >= 1 else "danger")
-                            ),
-                        )
-                        self.lbl_actual_record.pack(
-                            anchor="center", pady=Theme.scaled_val((5, 0))
-                        )
-                        self.btn_17lands_link.config(
-                            command=lambda: open_file(record["url"])
-                        )
-                        self.btn_17lands_link.pack(
-                            side="right", padx=Theme.scaled_val((0, 10))
-                        )
+                    record = Seventeenlands().get_draft_record(draft_id)
+                    self._record_cache[draft_id] = record
 
-                try:
-                    self.after(0, apply_ui)
-                except RuntimeError:
-                    pass
+                    try:
+                        self.after(0, lambda: apply_ui(record))
+                    except RuntimeError:
+                        pass
 
-            threading.Thread(target=fetch_17lands_record, daemon=True).start()
+                threading.Thread(target=fetch_17lands_record, daemon=True).start()

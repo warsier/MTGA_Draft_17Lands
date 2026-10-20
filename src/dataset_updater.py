@@ -134,7 +134,9 @@ class DatasetUpdater:
         def reject_constant(value):
             raise ValueError(f"Invalid JSON number: {value}")
 
-        data = json.loads(payload.decode("utf-8"), parse_constant=reject_constant)
+        if not payload.lstrip().startswith(b"{"):
+            raise ValueError("Dataset payload must be UTF-8 JSON")
+        data = json.loads(payload, parse_constant=reject_constant)
         validate_dataset_payload(data)
         return payload
 
@@ -209,10 +211,11 @@ class DatasetUpdater:
             if "active_sets" in remote_manifest:
                 local_manifest["active_sets"] = remote_manifest["active_sets"]
             self.save_local_manifest(local_manifest)
+            if updates_made:
+                invalidate_local_set_cache()
             if failures:
                 progress_callback(f"Skipped {failures} dataset update(s). Kept cached data.")
             elif updates_made:
-                invalidate_local_set_cache()
                 progress_callback("Datasets updated successfully.")
         except Exception as error:
             logger.error(f"Failed to sync datasets; kept cached data: {error}")

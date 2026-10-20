@@ -16,11 +16,20 @@ os.makedirs(SCRYFALL_CACHE_DIR, exist_ok=True)
 def _unwrap_card_payload(payload) -> list:
     """Extract card items list from raw API response payload."""
     if isinstance(payload, dict):
-        data = payload.get("data")
-        return data if isinstance(data, list) else []
-    elif isinstance(payload, list):
-        return payload
-    return []
+        if "error" in payload or "detail" in payload:
+            raise ValueError(f"17Lands API error response: {payload}")
+        data = payload.get("cards", payload.get("data"))
+        if not isinstance(data, list):
+            raise ValueError("Invalid 17Lands card payload structure: expected list under 'cards' or 'data'")
+        payload = data
+    elif not isinstance(payload, list):
+        raise ValueError(f"Invalid 17Lands card payload structure: expected list or dict, got {type(payload)}")
+
+    for item in payload:
+        if not isinstance(item, dict) or not str(item.get("name", "")).strip():
+            raise ValueError(f"Invalid card item in payload: {item}")
+
+    return payload
 
 
 def extract_scryfall_data(client, set_code: str) -> dict:

@@ -245,12 +245,26 @@ def export_draft_to_csv(history, dataset, picked_cards_map):
 
     for entry in history:
         entry_picked = set(str(x) for x in entry.get("Picked", []))
-        for cid in entry.get("Cards", []):
-            c_list = dataset.get_data_by_id([cid])
-            if not c_list:
+        card_ids = entry.get("Cards", [])
+        if not card_ids:
+            continue
+        c_list = dataset.get_data_by_id(card_ids)
+        cards_by_id = {}
+        for c in c_list:
+            if not c:
                 continue
-            c = c_list[0]
+            for k in ("arena_id", "id", "grpid"):
+                if k in c:
+                    cards_by_id[str(c[k])] = c
+
+        for cid in card_ids:
             str_cid = str(cid)
+            c = cards_by_id.get(str_cid)
+            if not c:
+                single = dataset.get_data_by_id([cid])
+                c = single[0] if single else None
+            if not c:
+                continue
             stats = c.get("deck_colors", {}).get("All Decks", {})
             writer.writerow(
                 [
@@ -278,12 +292,27 @@ def export_draft_to_json(history, dataset, picked_cards_map):
     for entry in history:
         pack_data = {"Pack": entry["Pack"], "Pick": entry["Pick"], "Cards": []}
         entry_picked = set(str(x) for x in entry.get("Picked", []))
-        for cid in entry.get("Cards", []):
-            c_list = dataset.get_data_by_id([cid])
-            if not c_list:
+        card_ids = entry.get("Cards", [])
+        if not card_ids:
+            output.append(pack_data)
+            continue
+        c_list = dataset.get_data_by_id(card_ids)
+        cards_by_id = {}
+        for c in c_list:
+            if not c:
                 continue
-            c = c_list[0]
+            for k in ("arena_id", "id", "grpid"):
+                if k in c:
+                    cards_by_id[str(c[k])] = c
+
+        for cid in card_ids:
             str_cid = str(cid)
+            c = cards_by_id.get(str_cid)
+            if not c:
+                single = dataset.get_data_by_id([cid])
+                c = single[0] if single else None
+            if not c:
+                continue
             pack_data["Cards"].append(
                 {
                     "Name": c.get("name", ""),
@@ -344,7 +373,7 @@ class CardResult:
         return_list = []
         for card in card_list:
             try:
-                selected_card = copy.deepcopy(card)
+                selected_card = dict(card)
                 selected_card["results"] = ["NA"] * len(fields)
                 primary_color = (
                     colors[0] if colors else constants.FILTER_OPTION_ALL_DECKS

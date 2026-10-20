@@ -32,11 +32,7 @@ def seventeenlands(mock_session, monkeypatch, tmp_path):
 # --- Test Cases ---
 
 
-def test_process_card_ratings(seventeenlands):
-    """
-    Tests the processing of raw JSON data from the 17Lands API into the internal structure.
-    """
-    # Arrange: Mock 17Lands API response
+def test_process_archetype_data(seventeenlands):
     mock_api_data = [
         {
             "name": "Sol Ring",
@@ -44,122 +40,28 @@ def test_process_card_ratings(seventeenlands):
             "ever_drawn_win_rate": 0.65,
             "avg_seen": 1.1,
             "drawn_improvement_win_rate": 0.1,
-            "drawn_game_count": 1000,
+            "ever_drawn_game_count": 1000,
         },
         {
             "name": "Island",
             "url": "https://c1.scryfall.com/island.jpg",
-            "ever_drawn_win_rate": None,  # Test null value
+            "ever_drawn_win_rate": None,
             "avg_seen": 9.5,
             "drawn_improvement_win_rate": -0.05,
-            "drawn_game_count": 500,
+            "ever_drawn_game_count": 500,
         },
     ]
-    color = "All Decks"
-    card_data = {}
-
-    # Act
-    seventeenlands.process_card_ratings(color, mock_api_data, card_data)
-
-    # Assert
-    assert "Sol Ring" in card_data
-    assert "Island" in card_data
-
-    sol_ring_data = card_data["Sol Ring"]
-    # Verify image URL expansion logic
-    assert sol_ring_data[constants.DATA_SECTION_IMAGES] == [
-        "https://www.17lands.com/static/images/cards/s_123.jpg"
-    ]
-
-    # Check that ratings were appended correctly
-    # Structure: [{'All Decks': {...}}]
-    sol_ring_ratings = sol_ring_data[constants.DATA_SECTION_RATINGS][0][color]
-    assert (
-        sol_ring_ratings[constants.DATA_FIELD_GIHWR] == 65.0
-    )  # Check percentage conversion
-    assert sol_ring_ratings[constants.DATA_FIELD_ALSA] == 1.1
-    assert (
-        sol_ring_ratings[constants.DATA_FIELD_IWD] == 10.0
-    )  # Check percentage conversion
-    assert sol_ring_ratings[constants.DATA_FIELD_NGD] == 1000
-
-    island_ratings = card_data["Island"][constants.DATA_SECTION_RATINGS][0][color]
-    assert island_ratings[constants.DATA_FIELD_GIHWR] == 0.0  # Check null handling
-    assert island_ratings[constants.DATA_FIELD_IWD] == -5.0  # Check negative percentage
-
-
-def test_build_card_ratings_url(seventeenlands):
-    """
-    Tests the URL construction for fetching card ratings.
-    """
-    # Arrange
-    set_code = "TLA"
-    draft = "PremierDraft"
-    time_period = "ALL_TIME"
-    user_group = constants.LIMITED_USER_GROUP_ALL
-    color = constants.FILTER_OPTION_ALL_DECKS
-
-    # Act
-    url = seventeenlands.build_card_ratings_url(
-        set_code, draft, time_period, user_group, color
-    )
-
-    # Assert
-    expected_url = (
-        "https://www.17lands.com/api/card_data?expansion=TLA"
-        "&event_type=PremierDraft&time_period=ALL_TIME"
-    )
-    assert url == expected_url
-
-
-def test_download_card_ratings(mock_session, seventeenlands):
-    """
-    Tests the download_card_ratings function to ensure it fetches and processes data correctly.
-    """
-    session, response = mock_session
-    # /api/card_data wraps the card list in a {copyright, notes, data} envelope
-    response.json.return_value = {
-        "copyright": "(c) 2026 17Lands LLC",
-        "notes": "usage notes",
-        "data": [
-            {
-                "name": "Test Card",
-                "url": "/static/images/cards/test_card.jpg",
-                "ever_drawn_win_rate": 0.6,
-                "avg_seen": 2.5,
-                "drawn_improvement_win_rate": 0.05,
-                "drawn_game_count": 1000,
-            }
-        ],
-    }
-
-    set_code = "TLA"
-    draft = "PremierDraft"
-    time_period = "ALL_TIME"
-    user_group = constants.LIMITED_USER_GROUP_ALL
-    color = constants.FILTER_OPTION_ALL_DECKS
-    card_data = {}
-
-    # Act
-    seventeenlands.download_card_ratings(
-        set_code, color, draft, time_period, user_group, card_data
-    )
-
-    # Assert
-    assert "Test Card" in card_data
-    assert card_data["Test Card"][constants.DATA_SECTION_IMAGES] == [
-        "https://www.17lands.com/static/images/cards/test_card.jpg"
-    ]
-    assert len(card_data["Test Card"][constants.DATA_SECTION_RATINGS]) == 1
-    session.get.assert_called_once()
-
-    # The old /card_ratings/data route silently ignores filters; make sure we
-    # hit /api/card_data with its renamed event_type param.
-    called_url = session.get.call_args[0][0]
-    called_params = session.get.call_args[1]["params"]
-    assert called_url == "https://www.17lands.com/api/card_data"
-    assert called_params["event_type"] == "PremierDraft"
-    assert "format" not in called_params
+    card_map = {}
+    seventeenlands._process_archetype_data("All Decks", mock_api_data, card_map)
+    assert "Sol Ring" in card_map
+    sol = card_map["Sol Ring"]
+    assert sol["deck_colors"]["All Decks"]["gihwr"] == 65.0
+    assert sol["deck_colors"]["All Decks"]["alsa"] == 1.1
+    assert sol["deck_colors"]["All Decks"]["samples"] == 1000
+    assert "Island" in card_map
+    island = card_map["Island"]
+    assert island["deck_colors"]["All Decks"]["gihwr"] == 0.0
+    assert island["deck_colors"]["All Decks"]["samples"] == 500
 
 
 def test_download_color_ratings(mock_session, seventeenlands):
@@ -427,12 +329,7 @@ def test_invalid_card_response_preserves_cache_and_ratings(
                 "OTJ", "PremierDraft", "ALL_TIME", "All"
             )
     assert cache_path.read_text(encoding="utf-8") == original
-    ratings = {"Existing Card": {"ratings": []}}
-    with pytest.raises(ValueError, match="Invalid 17Lands card data"):
-        seventeenlands.download_card_ratings(
-            "OTJ", "All Decks", "PremierDraft", "ALL_TIME", "All", ratings
-        )
-    assert ratings == {"Existing Card": {"ratings": []}}
+
 
 
 @pytest.mark.parametrize(

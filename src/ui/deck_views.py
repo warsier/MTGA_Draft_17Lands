@@ -359,9 +359,14 @@ def render_deck_stats(
                 tags[t] = tags.get(t, 0) + count
 
         if show_subtypes and "Creature" in c.get("types", []):
-            for t in c.get("types", []):
-                if t not in supertypes:
+            card_subtypes = c.get("subtypes", [])
+            if card_subtypes:
+                for t in card_subtypes:
                     subtypes[t] = subtypes.get(t, 0) + count
+            else:
+                for t in c.get("types", []):
+                    if t not in supertypes:
+                        subtypes[t] = subtypes.get(t, 0) + count
 
     avg_cmc = cmc_sum / non_lands if non_lands else 0
     top_tribes = sorted(subtypes.items(), key=lambda x: x[1], reverse=True)[:5] if show_subtypes else []
@@ -582,25 +587,17 @@ def draw_sample_hand(
         name_lbl.bind("<Enter>", lambda e, f=frame: f.lift())
         name_lbl.bind("<Leave>", restore_z_order)
 
-        img_url = ""
-        urls = card.get("image", [])
-        if urls:
-            img_url = urls[0]
-        elif card.get("name") in constants.BASIC_LANDS:
-            img_url = f"https://api.scryfall.com/cards/named?exact={urllib.parse.quote(card.get('name'))}&format=image"
-
+        img_url = CardImageLoader.resolve_card_url(card)
         if not img_url:
             continue
 
         def make_callback(container_frame, card_ref):
             def on_loaded(im):
-                if not container_frame.winfo_exists():
-                    return
                 if im is None:
                     return
 
                 def apply_img():
-                    if container_frame.winfo_exists():
+                    if hasattr(container_frame, "winfo_exists") and container_frame.winfo_exists():
                         for w in container_frame.winfo_children():
                             w.destroy()
 
@@ -624,7 +621,10 @@ def draw_sample_hand(
                         lbl.bind("<Enter>", lambda e: container_frame.lift())
                         lbl.bind("<Leave>", restore_z_order)
 
-                after_fn(0, apply_img)
+                try:
+                    after_fn(0, apply_img)
+                except Exception:
+                    pass
 
             return on_loaded
 

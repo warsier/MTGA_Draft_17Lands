@@ -72,8 +72,12 @@ class APIClient:
         return None
 
     def _write_cache(self, full_url, response):
+        if response.status_code != 200:
+            return
         try:
             json_data = response.json()
+            if isinstance(json_data, dict) and ("error" in json_data or "detail" in json_data):
+                return
         except Exception:
             return  # Don't cache non-JSON
 
@@ -134,7 +138,6 @@ class APIClient:
                     continue
 
                 if resp.status_code == 404 and allow_404:
-                    self._write_cache(full_url, resp)
                     return resp
 
                 resp.raise_for_status()

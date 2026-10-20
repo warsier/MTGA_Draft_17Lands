@@ -76,15 +76,65 @@ def parse_mana_cost(mana_cost, fallback_cmc=0):
     return colored, generic
 
 
+def _parse_card_properties(c):
+    types = c.get("types", [])
+    tags = c.get("tags", [])
+    text = str(c.get("oracle_text", c.get("text", ""))).lower()
+    any_color = ANY_COLOR_RE.search(text) is not None
+
+    card_is_land = "Land" in types
+    card_is_ramp = (
+        "fixing_ramp" in tags or any_color or "treasure" in text
+    ) and not card_is_land
+    card_is_removal = "removal" in tags
+
+    card_mana_produced = 0
+    if card_is_land or card_is_ramp:
+        if any_color or "treasure" in text:
+            card_mana_produced = ANY_COLOR
+        else:
+            symbols = []
+            for clause in ADD_CLAUSE_RE.findall(text):
+                symbols.extend(PIP_PATTERN.findall(clause))
+            mask = 0
+            if symbols:
+                for symbol in symbols:
+                    for color in symbol.upper().split("/"):
+                        mask |= COLOR_BITS.get(color, 0)
+            else:
+                for color in c.get("colors", []):
+                    mask |= COLOR_BITS.get(color, 0)
+            card_mana_produced = mask
+
+    card_pips = np.zeros(MAX_PIPS, dtype=np.int32)
+    card_pip_cnt = 0
+    card_gen = 0
+    card_cost = 0
+
+    if not card_is_land:
+        colored, gen = parse_mana_cost(c.get("mana_cost", ""), c.get("cmc", 0))
+        total = len(colored) + gen
+        colored = colored[:MAX_PIPS]
+        for p, mask in enumerate(colored):
+            card_pips[p] = mask
+        card_pip_cnt = len(colored)
+        card_gen = min(total - len(colored), 100)
+        card_cost = min(total, 100)
+
+    return (
+        card_is_land,
+        card_is_ramp,
+        card_is_removal,
+        card_cost,
+        card_mana_produced,
+        card_pips,
+        card_pip_cnt,
+        card_gen,
+    )
+
+
 def _parse_deck_to_arrays(deck_list):
     """Converts the deck from slow Python dicts to fast NumPy arrays."""
-    flat_deck = []
-    for c in deck_list:
-        flat_deck.extend([c] * int(c.get("count", 1)))
-
-    if len(flat_deck) < DECK_SIZE:
-        return None
-
     is_land = np.zeros(DECK_SIZE, dtype=np.bool_)
     is_ramp = np.zeros(DECK_SIZE, dtype=np.bool_)
     is_removal = np.zeros(DECK_SIZE, dtype=np.bool_)
@@ -94,53 +144,139 @@ def _parse_deck_to_arrays(deck_list):
     pip_count = np.zeros(DECK_SIZE, dtype=np.int8)
     generic = np.zeros(DECK_SIZE, dtype=np.int8)
 
-    for i, c in enumerate(flat_deck[:DECK_SIZE]):
-        types = c.get("types", [])
-        tags = c.get("tags", [])
-        text = str(c.get("oracle_text", c.get("text", ""))).lower()
-        any_color = ANY_COLOR_RE.search(text) is not None
+    idx = 0
+    for c in deck_list:
+        if idx >= DECK_SIZE:
+            break
+        cnt = min(int(c.get("count", 1) or 1), DECK_SIZE - idx)
+        if cnt <= 0:
+            continue
 
-        is_land[i] = "Land" in types
-        is_ramp[i] = (
-            "fixing_ramp" in tags or any_color or "treasure" in text
-        ) and not is_land[i]
-        is_removal[i] = "removal" in tags
+        props = _parse_card_properties(c)
+        end_idx = idx + cnt
 
-        # Calculate produced mana bitmask
-        if is_land[i] or is_ramp[i]:
-            if any_color or "treasure" in text:
-                mana_produced[i] = ANY_COLOR
-            else:
-                # Read production clauses, excluding symbols in activation costs.
-                symbols = []
-                for clause in ADD_CLAUSE_RE.findall(text):
-                    symbols.extend(PIP_PATTERN.findall(clause))
-                mask = 0
-                if symbols:
-                    for symbol in symbols:
-                        for color in symbol.upper().split("/"):
-                            mask |= COLOR_BITS.get(color, 0)
-                else:
-                    for color in c.get("colors", []):
-                        mask |= COLOR_BITS.get(color, 0)
-                mana_produced[i] = mask
+        is_land[idx:end_idx] = props[0]
+        is_ramp[idx:end_idx] = props[1]
+        is_removal[idx:end_idx] = props[2]
+        costs[idx:end_idx] = props[3]
+        mana_produced[idx:end_idx] = props[4]
+        pips[idx:end_idx, :] = props[5]
+        pip_count[idx:end_idx] = props[6]
+        generic[idx:end_idx] = props[7]
 
-        # Printed cost (castability deliberately ignores cycling / alt costs)
-        if not is_land[i]:
-            colored, gen = parse_mana_cost(c.get("mana_cost", ""), c.get("cmc", 0))
-            total = len(colored) + gen
-            # Pips beyond MAX_PIPS (8+ colored pips) are treated as generic
-            colored = colored[:MAX_PIPS]
-            for p, mask in enumerate(colored):
-                pips[i, p] = mask
-            pip_count[i] = len(colored)
-            generic[i] = min(total - len(colored), 100)
-            costs[i] = min(total, 100)
+        idx = end_idx
+
+    if idx < DECK_SIZE:
+        return None
 
     return DeckArrays(
-        is_land, is_ramp, is_removal, costs, mana_produced, pips, pip_count, generic
+        is_land,
+        is_ramp,
+        is_removal,
+        costs,
+        mana_produced,
+        pips,
+        pip_count,
+        generic,
     )
 
+
+def parse_base_deck_to_arrays(base_deck):
+    """Parses spells + non-basic lands once outside permutation loops."""
+    is_land = np.zeros(DECK_SIZE, dtype=np.bool_)
+    is_ramp = np.zeros(DECK_SIZE, dtype=np.bool_)
+    is_removal = np.zeros(DECK_SIZE, dtype=np.bool_)
+    costs = np.zeros(DECK_SIZE, dtype=np.int8)
+    mana_produced = np.zeros(DECK_SIZE, dtype=np.int32)
+    pips = np.zeros((DECK_SIZE, MAX_PIPS), dtype=np.int32)
+    pip_count = np.zeros(DECK_SIZE, dtype=np.int8)
+    generic = np.zeros(DECK_SIZE, dtype=np.int8)
+
+    idx = 0
+    for c in base_deck:
+        if idx >= DECK_SIZE:
+            break
+        cnt = min(int(c.get("count", 1) or 1), DECK_SIZE - idx)
+        if cnt <= 0:
+            continue
+
+        props = _parse_card_properties(c)
+        end_idx = idx + cnt
+
+        is_land[idx:end_idx] = props[0]
+        is_ramp[idx:end_idx] = props[1]
+        is_removal[idx:end_idx] = props[2]
+        costs[idx:end_idx] = props[3]
+        mana_produced[idx:end_idx] = props[4]
+        pips[idx:end_idx, :] = props[5]
+        pip_count[idx:end_idx] = props[6]
+        generic[idx:end_idx] = props[7]
+
+        idx = end_idx
+
+    return (
+        DeckArrays(
+            is_land,
+            is_ramp,
+            is_removal,
+            costs,
+            mana_produced,
+            pips,
+            pip_count,
+            generic,
+        ),
+        idx,
+    )
+
+
+def simulate_permutation(base_arrays, perm, iterations=2000):
+    """Runs Monte Carlo simulation by slicing basic lands into template arrays."""
+    template, n_base = base_arrays
+    is_land = template.is_land.copy()
+    is_ramp = template.is_ramp.copy()
+    is_removal = template.is_removal.copy()
+    costs = template.costs.copy()
+    mana_produced = template.mana_produced.copy()
+    pips = template.pips.copy()
+    pip_count = template.pip_count.copy()
+    generic = template.generic.copy()
+
+    idx = n_base
+    for color, count in perm.items():
+        if count <= 0 or idx >= DECK_SIZE:
+            continue
+        end = min(DECK_SIZE, idx + count)
+        is_land[idx:end] = True
+        mana_produced[idx:end] = COLOR_BITS.get(color, 0)
+        idx = end
+
+    if idx < DECK_SIZE:
+        return None
+
+    arrays = DeckArrays(
+        is_land,
+        is_ramp,
+        is_removal,
+        costs,
+        mana_produced,
+        pips,
+        pip_count,
+        generic,
+    )
+    results = _run_fast_monte_carlo(*arrays, iterations)
+    return {
+        "mulligans": (results[0] / iterations) * 100.0,
+        "screw_t3": (results[1] / iterations) * 100.0,
+        "screw_t4": (results[2] / iterations) * 100.0,
+        "flood_t5": (results[3] / iterations) * 100.0,
+        "cast_t2": (results[4] / iterations) * 100.0,
+        "cast_t3": (results[5] / iterations) * 100.0,
+        "cast_t4": (results[6] / iterations) * 100.0,
+        "curve_out": (results[7] / iterations) * 100.0,
+        "removal_t4": (results[8] / iterations) * 100.0,
+        "color_screw_t3": (results[9] / iterations) * 100.0,
+        "avg_hand_size": results[10] / iterations,
+    }
 
 @njit(cache=True, nogil=True)
 def _fill_cover(src_masks, n_src, cover):

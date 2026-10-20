@@ -217,13 +217,55 @@ class CardImageLoader:
     - In-memory LRU cache (capped to avoid memory bloat)
     - Persistent disk cache in Temp/Images
     - Shared ThreadPoolExecutor
+    - Main-thread PhotoImage caching and basic land Scryfall resolution
     """
     IMAGE_CACHE_DIR = os.path.join(constants.TEMP_FOLDER, "Images")
     _MAX_IN_MEMORY_IMAGES = 100
     _in_memory_images: "collections.OrderedDict[Tuple[str, Optional[Tuple[int, int]]], Image.Image]" = collections.OrderedDict()
+    _photo_cache: "collections.OrderedDict[Any, ImageTk.PhotoImage]" = collections.OrderedDict()
+    _MAX_PHOTO_CACHE = 150
     _in_flight: Dict[Any, List[Any]] = {}
     _lock = threading.Lock()
     _image_executor = ThreadPoolExecutor(max_workers=4)
+
+    @classmethod
+    def resolve_card_url(cls, card: dict) -> str:
+        """Resolves the best image URL for a card with basic land fallback."""
+        if not card or not isinstance(card, dict):
+            return ""
+        urls = card.get(constants.DATA_SECTION_IMAGES) or card.get("images") or card.get("image")
+        if isinstance(urls, list) and urls:
+            for u in urls:
+                if u and isinstance(u, str):
+                    return cls.normalize_url(u)
+        elif isinstance(urls, str) and urls:
+            return cls.normalize_url(urls)
+
+        name = card.get("name", "")
+        clean_name = name.replace("Snow-Covered ", "").strip()
+        basic_names = getattr(constants, "BASIC_LANDS", ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"])
+        if clean_name in basic_names:
+            import urllib.parse
+            encoded = urllib.parse.quote(clean_name)
+            return f"https://api.scryfall.com/cards/named?exact={encoded}&format=image&version=normal"
+
+        return ""
+
+    @classmethod
+    def get_or_create_photo(cls, im: Image.Image, cache_key: Any = None) -> Optional[ImageTk.PhotoImage]:
+        """Returns or creates a cached ImageTk.PhotoImage for the given PIL Image on the main thread."""
+        if im is None:
+            return None
+        key = cache_key if cache_key is not None else (id(im), getattr(im, "size", None))
+        if key in cls._photo_cache:
+            photo = cls._photo_cache[key]
+            cls._photo_cache.move_to_end(key)
+            return photo
+        photo = ImageTk.PhotoImage(im)
+        if len(cls._photo_cache) >= cls._MAX_PHOTO_CACHE:
+            cls._photo_cache.popitem(last=False)
+        cls._photo_cache[key] = photo
+        return photo
 
     @classmethod
     def normalize_url(cls, u: str) -> str:
@@ -321,6 +363,7 @@ class CardImageLoader:
         with cls._lock:
             cls._in_memory_images.clear()
             cls._in_flight.clear()
+        cls._photo_cache.clear()
 
 
 class CardToolTip(tkinter.Toplevel):
@@ -631,20 +674,20 @@ class CardToolTip(tkinter.Toplevel):
         target_size = (int(240 * s), int(335 * s))
 
         def on_image_loaded(im):
-            if not hasattr(self, "winfo_exists") or not self.winfo_exists():
-                return
-            if im is None:
-                try:
-                    self.after(0, lambda: self._apply_error() if self.winfo_exists() else None)
-                except RuntimeError:
-                    pass
-            else:
-                try:
-                    self.after(0, lambda: self._apply_image(im) if self.winfo_exists() else None)
-                except RuntimeError:
-                    pass
+            try:
+                self.after(0, lambda: self._apply_loaded(im))
+            except Exception:
+                pass
 
         CardImageLoader.load_image_async(u, target_size, on_image_loaded)
+
+    def _apply_loaded(self, im):
+        if not hasattr(self, "winfo_exists") or not self.winfo_exists():
+            return
+        if im is None:
+            self._apply_error()
+        else:
+            self._apply_image(im)
 
     def _fetch_and_apply_image(self, u, s, cache_key):
         """Worker method preserved for backwards compatibility."""
@@ -1173,7 +1216,8 @@ class DynamicTreeviewManager(ttk.Frame):
         # Dynamically lock the column width to the scrollbar's exact size to prevent resizing loops
         def _sync_column_width(e):
             req = self._scrollbar.winfo_reqwidth()
-            if req > 1:
+            if req > 1 and getattr(self, "_last_sb_reqwidth", None) != req:
+                self._last_sb_reqwidth = req
                 self.columnconfigure(1, minsize=req)
 
         self._scrollbar.bind("<Configure>", _sync_column_width, add="+")

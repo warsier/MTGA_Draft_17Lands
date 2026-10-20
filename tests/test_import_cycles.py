@@ -27,10 +27,28 @@ MODULES = [
 ]
 
 
-@pytest.mark.parametrize("module", MODULES)
-def test_module_imports_in_fresh_process(module):
+def test_module_imports_in_fresh_process():
+    code = """
+import sys, importlib
+
+modules = [
+    "src.card_utils",
+    "src.advisor.mana_base",
+    "src.advisor.simulator",
+    "src.advisor.deck_scorer",
+    "src.advisor.deck_builder",
+    "src.advisor.engine",
+    "src.card_logic",
+]
+
+for mod in modules:
+    to_delete = [k for k in sys.modules if k.startswith("src")]
+    for k in to_delete:
+        del sys.modules[k]
+    importlib.import_module(mod)
+"""
     result = subprocess.run(
-        [sys.executable, "-c", f"import {module}"],
+        [sys.executable, "-c", code],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

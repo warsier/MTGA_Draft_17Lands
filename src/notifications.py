@@ -76,6 +76,9 @@ class Notifications:
             self.dataset_window.enter(args)
 
     def check_dataset(self):
+        if getattr(self.configuration, "_synced_on_boot", False):
+            self.configuration._synced_on_boot = False
+            return
         if (
             self.configuration.settings.update_notifications_enabled
             and self.configuration.settings.auto_sync_datasets

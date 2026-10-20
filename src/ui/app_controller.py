@@ -30,6 +30,10 @@ class AppController:
         self.config = app_context.configuration
         self.orchestrator = app_context.orchestrator
         self.previous_timestamp = 0
+        self._advisor_cache = {}
+        self._dirty_tabs = set()
+        self.last_filtered_options = []
+        self.last_deck_metrics = None
         self._update_task_id = None
 
     def start_boot_sync(self):
@@ -127,7 +131,12 @@ class AppController:
                 self.app.top_bar.set_history_dropdown_state("readonly")
                 self.app.top_bar.update_data_sources()
                 self.app.top_bar.update_deck_filter_options()
-                self.refresh_ui_data()
+                try:
+                    self.refresh_ui_data()
+                finally:
+                    suggest_bld = getattr(getattr(self.app, "panel_suggest", None), "is_building", False)
+                    if not suggest_bld and hasattr(self.app, "loading_overlay"):
+                        self.app.loading_overlay.hide()
                 if is_test:
                     self.root.update()
 
@@ -214,19 +223,34 @@ class AppController:
         finally:
             self.orchestrator.scanner.lock.release()
 
-        # ADVISOR & SIGNAL MATH
-        sig_calc = SignalCalculator(metrics)
-        scores = {c: 0.0 for c in constants.CARD_COLORS}
-        for entry in history:
-            if entry["Pack"] == 2:
-                continue
-            h_pack = self.orchestrator.scanner.set_data.get_data_by_id(entry["Cards"])
-            for c, v in sig_calc.calculate_pack_signals(h_pack, entry["Pick"]).items():
-                scores[c] += v
+        # ADVISOR & SIGNAL MATH (Cached per pick state)
+        pack_names = tuple(c.get("name", "") for c in pack_cards)
+        advisor_key = (
+            len(history),
+            pk,
+            pi,
+            len(taken_cards),
+            id(metrics),
+            pack_names,
+        )
 
-        # Pass signals securely into Advisor
-        advisor = DraftAdvisor(metrics, taken_cards, signals=scores)
-        recommendations = advisor.evaluate_pack(pack_cards, pi, current_pack=pk)
+        if hasattr(self, "_advisor_cache") and advisor_key in self._advisor_cache:
+            scores, recommendations = self._advisor_cache[advisor_key]
+        else:
+            sig_calc = SignalCalculator(metrics)
+            scores = {c: 0.0 for c in constants.CARD_COLORS}
+            for entry in history:
+                if entry["Pack"] == 2:
+                    continue
+                h_pack = self.orchestrator.scanner.set_data.get_data_by_id(entry["Cards"])
+                for c, v in sig_calc.calculate_pack_signals(h_pack, entry["Pick"]).items():
+                    scores[c] += v
+
+            advisor = DraftAdvisor(metrics, taken_cards, signals=scores)
+            recommendations = advisor.evaluate_pack(pack_cards, pi, current_pack=pk)
+            if not hasattr(self, "_advisor_cache"):
+                self._advisor_cache = {}
+            self._advisor_cache[advisor_key] = (scores, recommendations)
 
         # UPDATE UI STATE
         if pk > 0:
@@ -241,6 +265,7 @@ class AppController:
         colors = filter_options(
             taken_cards, self.config.settings.deck_filter, metrics, self.config
         )
+        self.last_filtered_options = colors
 
         # PUSH DATA TO VIEWS
         self.app.top_bar.update_auto_detect_label(colors)
@@ -269,10 +294,11 @@ class AppController:
         )
 
         deck_metrics = get_deck_metrics(taken_cards)
+        self.last_deck_metrics = deck_metrics
         self.app.dashboard.update_stats(deck_metrics.distribution_all)
         self.app.dashboard.update_deck_balance(taken_cards)
         self.app.dashboard.orchestrator = self.orchestrator
-        self.app.dashboard.update_pool_summary(taken_cards, metrics, draft_id)
+        self.app.dashboard.update_pool_summary(taken_cards, metrics, draft_id, deck_metrics=deck_metrics)
 
         if self.app.overlay_window:
             self.app.overlay_window.update_data(
@@ -284,21 +310,43 @@ class AppController:
                 recommendations,
                 current_picked_cards,
                 scores,
+                deck_metrics=deck_metrics,
             )
 
-        # Broadcast refresh downwards
-        for p in [
+        # Broadcast refresh downwards (with lazy-refresh for hidden notebook tabs)
+        tabs_visible = getattr(getattr(self.app, "layout", None), "tabs_visible", False)
+        notebook = getattr(getattr(self.app, "layout", None), "notebook", None)
+        selected_tab = None
+        if tabs_visible and notebook:
+            try:
+                selected_tab = notebook.select()
+            except Exception:
+                selected_tab = None
+
+        all_panels = [
             self.app.panel_taken,
             self.app.panel_suggest,
             self.app.panel_custom,
             self.app.panel_compare,
             self.app.panel_tiers,
-        ]:
-            try:
-                if hasattr(p, "refresh"):
-                    p.refresh()
-            except Exception:
-                pass
+        ]
+
+        if not hasattr(self, "_dirty_tabs"):
+            self._dirty_tabs = set()
+
+        for p in all_panels:
+            if not p:
+                continue
+            is_active = (not tabs_visible) or (selected_tab and str(p) == str(selected_tab))
+            if is_active or not self.root.winfo_viewable():
+                try:
+                    if hasattr(p, "refresh"):
+                        p.refresh()
+                    self._dirty_tabs.discard(p)
+                except Exception:
+                    pass
+            else:
+                self._dirty_tabs.add(p)
 
         self.app.current_pack_data = pack_cards
         self.app.current_missing_data = missing_cards
