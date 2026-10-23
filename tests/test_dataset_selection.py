@@ -130,3 +130,22 @@ def test_missing_event_dataset_clears_prior_statistics(write_config, scanner):
     assert not orchestrator.sync_dataset_to_event()
     scanner.retrieve_set_data.assert_called_once_with("")
     assert config.card_data.latest_dataset == ""
+
+
+def test_selection_prefers_merged_draft_for_premier_and_contender(scanner):
+    scanner.retrieve_data_sources.return_value = {
+        "[MH3] ContenderDraft (All)": "contender.json",
+        "[MH3] PremierDraft (All)": "premier.json",
+        "[MH3] Draft (All)": "merged_draft.json",
+    }
+    # When active event is PremierDraft
+    scanner.retrieve_current_limited_event.return_value = ("MH3", "PremierDraft")
+    assert select_event_dataset(scanner) == "merged_draft.json"
+
+    # When active event is ContenderDraft
+    scanner.retrieve_current_limited_event.return_value = ("MH3", "ContenderDraft")
+    assert select_event_dataset(scanner) == "merged_draft.json"
+
+    # When merged Draft does not exist, fall back to matching event
+    scanner.retrieve_data_sources.return_value.pop("[MH3] Draft (All)")
+    assert select_event_dataset(scanner) == "contender.json"

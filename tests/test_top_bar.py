@@ -301,3 +301,42 @@ def test_set_selector_and_alchemy_fallback(mock_retrieve, root, mock_app_context
     top_bar.on_set_change()
     assert mock_app_context.vars["selected_set"].get() == "Y26FRA"
     assert mock_app_context.vars["selected_event"].get() == "PremierDraft"
+
+
+@patch("src.ui.top_bar.retrieve_local_set_list")
+def test_top_bar_defaults_to_merged_draft_for_human_drafts(mock_retrieve, root, mock_app_context):
+    """Verify that when Draft (merged) is available, both Premier and Contender default to Draft."""
+    top_bar = TopBarControls(root, mock_app_context)
+    mock_app_context._initialized = True
+
+    mock_retrieve.return_value = (
+        [
+            ("FRA", "Draft", "All", "2026", "2026", 570, "/mock/fra_draft.json", "2026"),
+            ("FRA", "PremierDraft", "All", "2026", "2026", 550, "/mock/fra_premier.json", "2026"),
+            ("FRA", "ContenderDraft", "All", "2026", "2026", 14, "/mock/fra_contender.json", "2026"),
+        ],
+        [],
+    )
+
+    # 1. MTGA logs PremierDraft -> UI defaults to Draft
+    mock_app_context.orchestrator.scanner.retrieve_current_limited_event.return_value = (
+        "FRA",
+        "PremierDraft",
+    )
+    top_bar.update_data_sources()
+    assert mock_app_context.vars["selected_event"].get() == "Draft"
+
+    event_menu = top_bar.om_event["menu"]
+    event_labels = [event_menu.entrycget(i, "label") for i in range(event_menu.index("end") + 1)]
+    assert "Draft (Premier + Contender)" in event_labels
+    assert "PremierDraft" in event_labels
+    assert "ContenderDraft" in event_labels
+
+    # 2. MTGA logs ContenderDraft -> UI also defaults to Draft
+    mock_app_context.active_event_type = ""
+    mock_app_context.orchestrator.scanner.retrieve_current_limited_event.return_value = (
+        "FRA",
+        "ContenderDraft",
+    )
+    top_bar.update_data_sources()
+    assert mock_app_context.vars["selected_event"].get() == "Draft"

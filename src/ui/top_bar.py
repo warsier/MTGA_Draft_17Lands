@@ -248,7 +248,10 @@ class TopBarControls(ttk.Frame):
         menu = menu_widget["menu"]
         menu.delete(0, "end")
         for opt in options:
-            menu.add_command(label=opt, command=tkinter._setit(variable, opt))
+            label = opt
+            if opt == constants.LIMITED_TYPE_STRING_DRAFT_MERGED:
+                label = "Draft (Premier + Contender)"
+            menu.add_command(label=label, command=tkinter._setit(variable, opt))
 
     def update_deck_filter_options(self):
         if self.app._loading and self.app.vars["deck_filter"].get() != "":
@@ -433,8 +436,20 @@ class TopBarControls(ttk.Frame):
         current_selection = self.app.vars["selected_event"].get()
 
         if event_transitioned or current_selection not in available_events:
-            if current_event_type in available_events:
+            # Prefer merged Draft dataset for human draft sessions (Premier / Contender / Draft)
+            if (
+                current_event_type in (
+                    constants.LIMITED_TYPE_STRING_DRAFT_PREMIER,
+                    constants.LIMITED_TYPE_STRING_DRAFT_CONTENDER,
+                    constants.LIMITED_TYPE_STRING_DRAFT_MERGED,
+                )
+                and constants.LIMITED_TYPE_STRING_DRAFT_MERGED in available_events
+            ):
+                target_event = constants.LIMITED_TYPE_STRING_DRAFT_MERGED
+            elif current_event_type in available_events:
                 target_event = current_event_type
+            elif constants.LIMITED_TYPE_STRING_DRAFT_MERGED in available_events:
+                target_event = constants.LIMITED_TYPE_STRING_DRAFT_MERGED
             elif constants.LIMITED_TYPE_STRING_DRAFT_PREMIER in available_events:
                 target_event = constants.LIMITED_TYPE_STRING_DRAFT_PREMIER
             else:

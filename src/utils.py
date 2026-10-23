@@ -8,6 +8,7 @@ from enum import Enum
 from typing import List
 from src.constants import (
     LIMITED_TYPES_DICT,
+    LIMITED_TYPE_STRING_DRAFT_MERGED,
     LIMITED_GROUPS_LIST,
     SET_FILE_SUFFIX,
     SETS_FOLDER,
@@ -423,7 +424,10 @@ def read_dataset_info(filename: str, codes=None, names=None):
 
     if (
         (cleaned_codes and cleaned_set_code not in cleaned_codes)
-        or (event_type not in LIMITED_TYPES_DICT)
+        or (
+            event_type not in LIMITED_TYPES_DICT
+            and event_type != LIMITED_TYPE_STRING_DRAFT_MERGED
+        )
         or (user_group not in LIMITED_GROUPS_LIST)
         or (file_suffix != SET_FILE_SUFFIX)
     ):

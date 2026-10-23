@@ -208,6 +208,14 @@ class DatasetUpdater:
                     if tmp_path and os.path.exists(tmp_path):
                         os.remove(tmp_path)
 
+            try:
+                from src.dataset_merger import auto_merge_local_draft_datasets
+                merged_files = auto_merge_local_draft_datasets(self.sets_folder)
+                if merged_files:
+                    updates_made = True
+            except Exception as merge_err:
+                logger.debug(f"Auto-merge after sync skipped: {merge_err}")
+
             if "active_sets" in remote_manifest:
                 local_manifest["active_sets"] = remote_manifest["active_sets"]
             self.save_local_manifest(local_manifest)

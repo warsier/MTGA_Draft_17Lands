@@ -14,7 +14,17 @@ def select_event_dataset(
     if not set_code:
         return None
     format_name = target_format or event_format
-    if format_name in constants.LIMITED_TYPES_DICT:
+    if format_name in (
+        constants.LIMITED_TYPE_STRING_DRAFT_PREMIER,
+        constants.LIMITED_TYPE_STRING_DRAFT_CONTENDER,
+        constants.LIMITED_TYPE_STRING_DRAFT_MERGED,
+    ):
+        formats = {
+            constants.LIMITED_TYPE_STRING_DRAFT_MERGED,
+            constants.LIMITED_TYPE_STRING_DRAFT_PREMIER,
+            constants.LIMITED_TYPE_STRING_DRAFT_CONTENDER,
+        }
+    elif format_name in constants.LIMITED_TYPES_DICT:
         formats = {
             fmt for fmt, kind in constants.LIMITED_TYPES_DICT.items()
             if kind == constants.LIMITED_TYPES_DICT[format_name]
@@ -23,10 +33,21 @@ def select_event_dataset(
         formats = {target_format}
     else:
         # Special event display labels (e.g. OpenDay1) are not format identifiers.
-        formats = {
-            fmt for fmt, kind in constants.LIMITED_TYPES_DICT.items()
-            if kind == scanner.draft_type
-        }
+        if getattr(scanner, "draft_type", None) in (
+            constants.LIMITED_TYPE_DRAFT_PREMIER_V1,
+            constants.LIMITED_TYPE_DRAFT_PREMIER_V2,
+            constants.LIMITED_TYPE_DRAFT_CONTENDER,
+        ):
+            formats = {
+                constants.LIMITED_TYPE_STRING_DRAFT_MERGED,
+                constants.LIMITED_TYPE_STRING_DRAFT_PREMIER,
+                constants.LIMITED_TYPE_STRING_DRAFT_CONTENDER,
+            }
+        else:
+            formats = {
+                fmt for fmt, kind in constants.LIMITED_TYPES_DICT.items()
+                if kind == getattr(scanner, "draft_type", None)
+            }
 
     def normalize(code):
         return re.sub(r"[\s._/-]", "", code).upper()
@@ -42,9 +63,15 @@ def select_event_dataset(
             continue
         if target_user and group != target_user:
             continue
+        is_merged = (fmt == constants.LIMITED_TYPE_STRING_DRAFT_MERGED)
         candidates.append(
-            (os.path.basename(path) != preferred_filename, group != "All", path)
+            (
+                os.path.basename(path) != preferred_filename,
+                not is_merged,
+                group != "All",
+                path,
+            )
         )
     # Sources already order newer datasets first; preserve that order on ties.
-    candidates.sort(key=lambda candidate: candidate[:2])
-    return candidates[0][2] if candidates else None
+    candidates.sort(key=lambda candidate: candidate[:3])
+    return candidates[0][3] if candidates else None

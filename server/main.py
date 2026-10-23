@@ -1,5 +1,6 @@
 import os
 import json
+import gzip
 import logging
 import time
 import traceback
@@ -268,6 +269,52 @@ def run_pipeline():
                 f"Processing failed: {e}",
                 user_group=user_group,
             )
+
+    # Merge PremierDraft and ContenderDraft datasets into unified Draft datasets
+    for set_code in active_sets.keys():
+        for user_group in ["All", "Top"]:
+            p_key = f"{set_code}_PremierDraft_{user_group}"
+            c_key = f"{set_code}_ContenderDraft_{user_group}"
+            draft_key = f"{set_code}_Draft_{user_group}"
+
+            if p_key in manifest["datasets"] and c_key in manifest["datasets"]:
+                try:
+                    p_file = os.path.join(config.OUTPUT_DIR, manifest["datasets"][p_key]["filename"])
+                    c_file = os.path.join(config.OUTPUT_DIR, manifest["datasets"][c_key]["filename"])
+
+                    def _read_json(fpath):
+                        if fpath.endswith(".gz"):
+                            with gzip.open(fpath, "rt", encoding="utf-8") as gf:
+                                return json.load(gf)
+                        with open(fpath, "r", encoding="utf-8") as f_in:
+                            return json.load(f_in)
+
+                    if os.path.exists(p_file) and os.path.exists(c_file):
+                        from src.dataset_merger import merge_datasets
+                        p_data = _read_json(p_file)
+                        c_data = _read_json(c_file)
+                        merged_dataset = merge_datasets(p_data, c_data, merged_event_name="Draft")
+
+                        file_info = save_dataset(set_code, "Draft", user_group, merged_dataset)
+                        file_info["start_date"] = merged_dataset["meta"].get("start_date", "")
+                        file_info["end_date"] = merged_dataset["meta"].get("end_date", "")
+                        manifest["datasets"][draft_key] = file_info
+
+                        card_count = len(merged_dataset.get("card_ratings", {}))
+                        total_games = merged_dataset["meta"].get("game_count", 0)
+                        report.record_dataset(
+                            set_code,
+                            "Draft",
+                            user_group,
+                            file_info,
+                            card_count,
+                            file_info["start_date"],
+                            file_info["end_date"],
+                            total_games,
+                        )
+                        logger.info(f"Generated merged Draft dataset for {set_code} ({user_group})")
+                except Exception as merge_err:
+                    logger.error(f"Failed to merge Premier and Contender for {set_code} ({user_group}): {merge_err}")
 
     validate_manifest(manifest)
     save_manifest(manifest)

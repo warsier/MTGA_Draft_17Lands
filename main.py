@@ -140,6 +140,16 @@ def load_data(args, config, progress_callback):
         else:
             progress_callback("Cloud sync disabled by user...")
 
+        # Auto-merge local Premier and Contender draft datasets
+        try:
+            from src.dataset_merger import auto_merge_local_draft_datasets
+            merged_files = auto_merge_local_draft_datasets()
+            if merged_files:
+                from src.utils import invalidate_local_set_cache
+                invalidate_local_set_cache()
+        except Exception as merge_err:
+            logger.debug(f"Auto-merge local draft datasets skipped: {merge_err}")
+
         # 4. METADATA REFRESH
         progress_callback("Checking 17Lands for New Sets...")
         limited_sets = LimitedSets().retrieve_limited_sets()
