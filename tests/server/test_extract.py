@@ -280,6 +280,9 @@ def test_get_historical_start_dates_success(mock_client):
 
     dates = get_historical_start_dates(mock_client)
 
+    mock_client.respectful_get.assert_called_once_with(
+        "https://www.17lands.com/data/filters"
+    )
     assert "M10" in dates
     assert dates["OTJ"] == "2024-04-16T15:00:00Z"
 

@@ -27,9 +27,10 @@ ADD_CLAUSE_RE = re.compile(r"\badd\b([^.;\n]*)")
 class DeckArrays(NamedTuple):
     is_land: np.ndarray  # bool[40]
     is_ramp: np.ndarray  # bool[40] non-land mana sources (rocks, dorks, treasure)
+    is_filter: np.ndarray  # bool[40] mana filters: fix colors, add no mana
     is_removal: np.ndarray  # bool[40]
     costs: np.ndarray  # int8[40] printed mana value used for castability
-    mana_produced: np.ndarray  # int32[40] color mask produced by lands/ramp
+    mana_produced: np.ndarray  # int32[40] color mask produced by lands/ramp/filters
     pips: np.ndarray  # int32[40, MAX_PIPS] colored pips, each a mask of options
     pip_count: np.ndarray  # int8[40] number of colored pips used in `pips`
     generic: np.ndarray  # int8[40] generic portion of the cost
@@ -76,6 +77,48 @@ def parse_mana_cost(mana_cost, fallback_cmc=0):
     return colored, generic
 
 
+MANA_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+
+
+def _mana_ability_balance(text):
+    """
+    Compares the mana each "cost: Add ..." ability spends with the mana it
+    makes. Returns (net_gain, filter): whether any ability makes more mana
+    than it costs (Sol Ring, Signets, "{T}: Add {G}"), and whether any ability
+    costs mana and makes no more than it costs (Prophetic Prism's
+    "{1}, {T}: Add one mana of any color"). `text` must be lowercase.
+    """
+    net_gain = has_filter = False
+    for ability in re.split(r"[.\n]", text):
+        match = re.match(r"(.*?):\s*add\b(.*)", ability)
+        if not match:
+            continue
+        cost, output = match.groups()
+
+        paid = 0
+        for sym in PIP_PATTERN.findall(cost):
+            if sym.isdigit():
+                paid += int(sym)
+            # Energy is a counter cost, not mana spent on activation.
+            elif sym not in ("t", "q", "x", "e"):
+                paid += 1
+
+        # "Add {R} or {G}" makes one mana; take the largest alternative
+        made = max(
+            len(PIP_PATTERN.findall(option))
+            for option in re.split(r",\s*(?:or\s+)?|\s+or\s+", output)
+        )
+        if not made:
+            word = re.search(r"\b(\w+) mana\b", output)
+            made = MANA_WORDS.get(word.group(1), 1) if word else 1
+
+        if made > paid:
+            net_gain = True
+        elif paid:
+            has_filter = True
+    return net_gain, has_filter
+
+
 def _parse_card_properties(c):
     types = c.get("types", [])
     tags = c.get("tags", [])
@@ -83,13 +126,22 @@ def _parse_card_properties(c):
     any_color = ANY_COLOR_RE.search(text) is not None
 
     card_is_land = "Land" in types
+    # Mana filters (Prophetic Prism, Chromatic Star) only convert mana:
+    # they fix colors but add no source. A card with any net-gain mana
+    # ability or a treasure ability stays ramp.
+    net_gain, filters = _mana_ability_balance(text)
+    card_is_filter = (
+        filters and not net_gain and "treasure" not in text and not card_is_land
+    )
     card_is_ramp = (
-        "fixing_ramp" in tags or any_color or "treasure" in text
-    ) and not card_is_land
+        ("fixing_ramp" in tags or any_color or "treasure" in text)
+        and not card_is_land
+        and not card_is_filter
+    )
     card_is_removal = "removal" in tags
 
     card_mana_produced = 0
-    if card_is_land or card_is_ramp:
+    if card_is_land or card_is_ramp or card_is_filter:
         if any_color or "treasure" in text:
             card_mana_produced = ANY_COLOR
         else:
@@ -124,6 +176,7 @@ def _parse_card_properties(c):
     return (
         card_is_land,
         card_is_ramp,
+        card_is_filter,
         card_is_removal,
         card_cost,
         card_mana_produced,
@@ -137,6 +190,7 @@ def _parse_deck_to_arrays(deck_list):
     """Converts the deck from slow Python dicts to fast NumPy arrays."""
     is_land = np.zeros(DECK_SIZE, dtype=np.bool_)
     is_ramp = np.zeros(DECK_SIZE, dtype=np.bool_)
+    is_filter = np.zeros(DECK_SIZE, dtype=np.bool_)
     is_removal = np.zeros(DECK_SIZE, dtype=np.bool_)
     costs = np.zeros(DECK_SIZE, dtype=np.int8)
     mana_produced = np.zeros(DECK_SIZE, dtype=np.int32)
@@ -157,12 +211,13 @@ def _parse_deck_to_arrays(deck_list):
 
         is_land[idx:end_idx] = props[0]
         is_ramp[idx:end_idx] = props[1]
-        is_removal[idx:end_idx] = props[2]
-        costs[idx:end_idx] = props[3]
-        mana_produced[idx:end_idx] = props[4]
-        pips[idx:end_idx, :] = props[5]
-        pip_count[idx:end_idx] = props[6]
-        generic[idx:end_idx] = props[7]
+        is_filter[idx:end_idx] = props[2]
+        is_removal[idx:end_idx] = props[3]
+        costs[idx:end_idx] = props[4]
+        mana_produced[idx:end_idx] = props[5]
+        pips[idx:end_idx, :] = props[6]
+        pip_count[idx:end_idx] = props[7]
+        generic[idx:end_idx] = props[8]
 
         idx = end_idx
 
@@ -172,6 +227,7 @@ def _parse_deck_to_arrays(deck_list):
     return DeckArrays(
         is_land,
         is_ramp,
+        is_filter,
         is_removal,
         costs,
         mana_produced,
@@ -185,6 +241,7 @@ def parse_base_deck_to_arrays(base_deck):
     """Parses spells + non-basic lands once outside permutation loops."""
     is_land = np.zeros(DECK_SIZE, dtype=np.bool_)
     is_ramp = np.zeros(DECK_SIZE, dtype=np.bool_)
+    is_filter = np.zeros(DECK_SIZE, dtype=np.bool_)
     is_removal = np.zeros(DECK_SIZE, dtype=np.bool_)
     costs = np.zeros(DECK_SIZE, dtype=np.int8)
     mana_produced = np.zeros(DECK_SIZE, dtype=np.int32)
@@ -205,12 +262,13 @@ def parse_base_deck_to_arrays(base_deck):
 
         is_land[idx:end_idx] = props[0]
         is_ramp[idx:end_idx] = props[1]
-        is_removal[idx:end_idx] = props[2]
-        costs[idx:end_idx] = props[3]
-        mana_produced[idx:end_idx] = props[4]
-        pips[idx:end_idx, :] = props[5]
-        pip_count[idx:end_idx] = props[6]
-        generic[idx:end_idx] = props[7]
+        is_filter[idx:end_idx] = props[2]
+        is_removal[idx:end_idx] = props[3]
+        costs[idx:end_idx] = props[4]
+        mana_produced[idx:end_idx] = props[5]
+        pips[idx:end_idx, :] = props[6]
+        pip_count[idx:end_idx] = props[7]
+        generic[idx:end_idx] = props[8]
 
         idx = end_idx
 
@@ -218,6 +276,7 @@ def parse_base_deck_to_arrays(base_deck):
         DeckArrays(
             is_land,
             is_ramp,
+            is_filter,
             is_removal,
             costs,
             mana_produced,
@@ -229,11 +288,12 @@ def parse_base_deck_to_arrays(base_deck):
     )
 
 
-def simulate_permutation(base_arrays, perm, iterations=2000):
+def simulate_permutation(base_arrays, perm, iterations=2000, seed=0):
     """Runs Monte Carlo simulation by slicing basic lands into template arrays."""
     template, n_base = base_arrays
     is_land = template.is_land.copy()
     is_ramp = template.is_ramp.copy()
+    is_filter = template.is_filter.copy()
     is_removal = template.is_removal.copy()
     costs = template.costs.copy()
     mana_produced = template.mana_produced.copy()
@@ -256,6 +316,7 @@ def simulate_permutation(base_arrays, perm, iterations=2000):
     arrays = DeckArrays(
         is_land,
         is_ramp,
+        is_filter,
         is_removal,
         costs,
         mana_produced,
@@ -263,7 +324,7 @@ def simulate_permutation(base_arrays, perm, iterations=2000):
         pip_count,
         generic,
     )
-    results = _run_fast_monte_carlo(*arrays, iterations)
+    results = _run_fast_monte_carlo(*_canonical_order(arrays), iterations, seed)
     return {
         "mulligans": (results[0] / iterations) * 100.0,
         "screw_t3": (results[1] / iterations) * 100.0,
@@ -324,6 +385,7 @@ def _collect_sources(
     turn,
     is_land,
     is_ramp,
+    is_filter,
     costs,
     mana_produced,
     pips,
@@ -346,6 +408,10 @@ def _collect_sources(
     the previous turn without modeling earlier ramp chains or reserving
     specific colors across ramp payments. Casting ramp is not charged against
     the current turn's mana.
+
+    Filters are deployed the same way but add only a color option, not a
+    source: their mask joins Hall's matching while the usable count stays the
+    same, since activating one spends a source to make one mana of its colors.
     """
     n = 0
     for j in range(start, start + seen):
@@ -370,14 +436,15 @@ def _collect_sources(
     has_cover = False
     for j in range(start, start + prev_seen):
         idx = deck_indices[j]
-        if is_ramp[idx] and costs[idx] < turn and n < MAX_SOURCES:
+        if (is_ramp[idx] or is_filter[idx]) and costs[idx] < turn and n < MAX_SOURCES:
             if not has_cover:
                 _fill_cover(land_masks, n_prev, cover)
                 has_cover = True
             if _can_pay(idx, pips, pip_count, generic, remaining, cover):
                 src_masks[n] = mana_produced[idx]
                 n += 1
-                usable += 1
+                if is_ramp[idx]:
+                    usable += 1
                 remaining -= costs[idx]
     return n, usable
 
@@ -390,6 +457,7 @@ def _castable_on_turn(
     turn,
     is_land,
     is_ramp,
+    is_filter,
     costs,
     mana_produced,
     pips,
@@ -420,6 +488,7 @@ def _castable_on_turn(
         turn,
         is_land,
         is_ramp,
+        is_filter,
         costs,
         mana_produced,
         pips,
@@ -445,6 +514,7 @@ def _castable_on_turn(
 def _run_fast_monte_carlo(
     is_land,
     is_ramp,
+    is_filter,
     is_removal,
     costs,
     mana_produced,
@@ -452,7 +522,9 @@ def _run_fast_monte_carlo(
     pip_count,
     generic,
     iterations,
+    seed=0,
 ):
+    np.random.seed(seed)
     mulligans = 0
     screw_t3 = 0
     screw_t4 = 0
@@ -531,6 +603,7 @@ def _run_fast_monte_carlo(
             2,
             is_land,
             is_ramp,
+            is_filter,
             costs,
             mana_produced,
             pips,
@@ -547,6 +620,7 @@ def _run_fast_monte_carlo(
             3,
             is_land,
             is_ramp,
+            is_filter,
             costs,
             mana_produced,
             pips,
@@ -563,6 +637,7 @@ def _run_fast_monte_carlo(
             4,
             is_land,
             is_ramp,
+            is_filter,
             costs,
             mana_produced,
             pips,
@@ -601,12 +676,36 @@ def _run_fast_monte_carlo(
     )
 
 
-def simulate_deck(deck_list, iterations=10000):
+def _canonical_order(arrays):
+    """Sorts the cards by their simulation profile, so list order and card
+    names don't change which random draws each card receives."""
+    keys = [arrays.pips[:, p] for p in range(MAX_PIPS - 1, -1, -1)]
+    keys += [
+        arrays.generic,
+        arrays.pip_count,
+        arrays.mana_produced,
+        arrays.costs,
+        arrays.is_removal,
+        arrays.is_filter,
+        arrays.is_ramp,
+        arrays.is_land,
+    ]
+    order = np.lexsort(keys)
+    return DeckArrays(*(a[order] for a in arrays))
+
+
+def simulate_deck(deck_list, iterations=10000, seed=0):
+    """
+    Every deck uses the same fixed seed (Common Random Numbers): a deck always
+    gets the same results, and deck-to-deck comparisons share one random
+    stream. Cards are put in a canonical order first, so decks with the same
+    simulation profile get identical results whatever their order or names.
+    """
     arrays = _parse_deck_to_arrays(deck_list)
     if not arrays:
         return None
 
-    results = _run_fast_monte_carlo(*arrays, iterations)
+    results = _run_fast_monte_carlo(*_canonical_order(arrays), iterations, seed)
 
     return {
         "mulligans": (results[0] / iterations) * 100.0,

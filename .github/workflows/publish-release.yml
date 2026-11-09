@@ -188,7 +188,7 @@ jobs:
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "MTGA Draft Tool v4.24-homebrew"
+          name: "MTGA Draft Tool v4.31-homebrew"
           tag_name: ${{ steps.prep_release.outputs.tag_name }}
           target_commitish: ${{ github.sha }}
           files: |

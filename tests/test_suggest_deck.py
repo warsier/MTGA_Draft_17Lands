@@ -83,15 +83,22 @@ class TestSuggestDeckPanel:
             },
         }
 
+    @staticmethod
+    def _wait_for_build(root, panel, timeout_s=5.0):
+        import time
+
+        deadline = time.monotonic() + timeout_s
+        while panel.is_building and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        root.update()
+
     def test_variants_displayed_in_dropdown(self, root, mock_draft, mock_variants):
         with patch("src.card_logic.suggest_deck", return_value=mock_variants):
             panel = SuggestDeckPanel(root, mock_draft, Configuration())
 
-            # Execute background task synchronously so assertions don't fire too early
-            panel.sim_executor.submit = lambda fn, *args, **kwargs: fn(*args, **kwargs)
-
             panel.refresh()
-            root.update()
+            self._wait_for_build(root, panel)
 
             menu = panel.om_archetype["menu"]
             last = menu.index("end")
@@ -104,11 +111,8 @@ class TestSuggestDeckPanel:
         with patch("src.card_logic.suggest_deck", return_value=mock_variants):
             panel = SuggestDeckPanel(root, mock_draft, Configuration())
 
-            # Execute background task synchronously so assertions don't fire too early
-            panel.sim_executor.submit = lambda fn, *args, **kwargs: fn(*args, **kwargs)
-
             panel.refresh()
-            root.update()
+            self._wait_for_build(root, panel)
 
             # Select the Splash deck
             splash_label = [k for k in panel.suggestions.keys() if "Splash" in k][0]

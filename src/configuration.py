@@ -90,6 +90,7 @@ class Settings(BaseModel):
 
     # Core Feature Toggles
     always_on_top: bool = False
+    advisor_enabled: bool = True
     card_colors_enabled: bool = False
     draft_log_enabled: bool = True
     update_notifications_enabled: bool = True
@@ -173,7 +174,6 @@ class Features(BaseModel):
     """This class represents a collection of features that can be enabled or disabled within the overlay"""
 
     override_scale_factor: float = 0.0
-    hotkey_enabled: bool = True
     images_enabled: bool = True
 
 

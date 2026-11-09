@@ -13,6 +13,7 @@ import json
 import io
 import os
 import hashlib
+import urllib.parse
 from typing import List, Dict
 from PIL import Image, ImageTk
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +32,17 @@ from src.ui.components import (
 from src.card_logic import copy_deck, get_deck_metrics
 from src.sealed_logic import SealedSession, generate_sealed_shells
 from src.utils import open_file
+
+
+SEALEDDECK_HOSTS = {"sealeddeck.tech", "www.sealeddeck.tech"}
+
+
+def is_sealeddeck_url(url: str) -> bool:
+    """Validate that an API-returned URL is an https://sealeddeck.tech link."""
+    if not isinstance(url, str) or not url or any(ch.isspace() for ch in url):
+        return False
+    parsed = urllib.parse.urlsplit(url)
+    return parsed.scheme == "https" and (parsed.hostname or "").lower() in SEALEDDECK_HOSTS
 
 
 class SealedStudioWindow(tb.Toplevel):
@@ -1561,10 +1573,10 @@ class SealedStudioWindow(tb.Toplevel):
                 if response.status_code == 200:
                     data = response.json()
                     url = data.get("url")
-                    if url:
+                    if is_sealeddeck_url(url):
                         open_file(url)
                     else:
-                        raise ValueError("No URL returned from API")
+                        raise ValueError("Invalid URL returned from API")
                 else:
                     raise Exception(f"HTTP {response.status_code}")
             except Exception as e:

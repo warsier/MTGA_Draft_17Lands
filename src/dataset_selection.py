@@ -64,14 +64,16 @@ def select_event_dataset(
         if target_user and group != target_user:
             continue
         is_merged = (fmt == constants.LIMITED_TYPE_STRING_DRAFT_MERGED)
+        is_exact_format = (fmt == format_name)
         candidates.append(
             (
                 os.path.basename(path) != preferred_filename,
                 not is_merged,
+                not is_exact_format,
                 group != "All",
                 path,
             )
         )
     # Sources already order newer datasets first; preserve that order on ties.
-    candidates.sort(key=lambda candidate: candidate[:3])
-    return candidates[0][3] if candidates else None
+    candidates.sort(key=lambda candidate: candidate[:4])
+    return candidates[0][4] if candidates else None

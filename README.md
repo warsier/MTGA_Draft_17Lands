@@ -2,7 +2,7 @@
 
 Magic: The Gathering Arena draft tool that utilizes 17Lands data.
 
-**Version 4.24-homebrew:** High-performance edition tracking upstream Version 4.24. Includes nogil Numba JIT Monte Carlo simulation, zero-allocation scalar kernels, marginal deck scoring memoization, synchronous disk I/O elimination, throttled UI refresh rates, consolidated deck views, hardened ETL validation, and 100% test pass rate. See the [release notes](release_notes.txt) for details.
+**Version 4.31-homebrew:** High-performance edition tracking upstream Version 4.31. Includes merged Premier + Contender Draft telemetry, top-bar Set Selector with Alchemy fallback, unified hybrid/Phyrexian/twobrid mana engine, nogil Numba JIT Monte Carlo simulation with Common Random Numbers, empirically calibrated Advisor & Deck Scorer, consolidated deck views, hardened ETL validation, and 100% test pass rate. See the [release notes](release_notes.txt) for details.
 
 **This application will automatically support new sets as soon as the sets are released on Arena _and_ the data is available on the [17Lands card ratings](https://www.17lands.com/card_ratings) page.**
 

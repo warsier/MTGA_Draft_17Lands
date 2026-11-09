@@ -52,6 +52,18 @@ class Dataset:
     # dataset switch to be re-queued instead of hitting Scryfall forever.
     MAX_RESOLVE_ATTEMPTS = 10
 
+    @staticmethod
+    def _card_metadata(card: Dict) -> Dict:
+        """Keep card identity/fields while dropping dataset-specific 17Lands stats."""
+        metadata = dict(card)
+        metadata.pop(DATA_FIELD_DECK_COLORS, None)
+        return metadata
+
+    def _remember(self, ratings: Dict[str, Dict], aid: str, card: Dict) -> Dict:
+        ratings[aid] = card if self._dataset else self._card_metadata(card)
+        self._fallback_ratings[aid] = self._card_metadata(card)
+        return ratings[aid]
+
     def _load_custom_cache(self):
         import os
         import json
@@ -63,7 +75,7 @@ class Dataset:
                 with open(cache_path, "r", encoding="utf-8") as f:
                     cached = json.load(f)
                 self._fallback_ratings = {
-                    k: v for k, v in cached.items()
+                    k: self._card_metadata(v) for k, v in cached.items()
                     if isinstance(v, dict) and not str(v.get("name", "")).isdigit()
                 }
             except Exception:
@@ -143,8 +155,9 @@ class Dataset:
                     for aid in ids:
                         card = resolver._fallback_ratings.get(aid)
                         if card and not str(card.get("name", "")).isdigit():
-                            ratings[aid] = card
-                            fallback[aid] = card
+                            metadata = self._card_metadata(card)
+                            ratings[aid] = self._name_index.get(metadata.get(DATA_FIELD_NAME), metadata)
+                            fallback[aid] = metadata
                             self._pending_ids.discard(aid)
                             self._retry_after.pop(aid, None)
                             self._retry_counts.pop(aid, None)
@@ -177,6 +190,11 @@ class Dataset:
 
     def _resolve_unknown_ids_batch(self, grp_ids: List[str]) -> Dict[str, str]:
         """Queries the local MTG Arena database to batch translate unknown IDs."""
+        if "_resolve_unknown_id" in self.__dict__:
+            return {
+                str(grp_id): self._resolve_unknown_id(str(grp_id))
+                for grp_id in grp_ids
+            }
         result = {}
         missing_ids = []
         for grp_id in grp_ids:
@@ -383,8 +401,11 @@ class Dataset:
 
         for arena_id in id_list:
             string_id = str(arena_id)
-            if string_id in ratings and not str(ratings[string_id].get("name", "")).isdigit():
-                result_map[string_id] = ratings[string_id]
+            card = ratings.get(string_id) or self._fallback_ratings.get(string_id)
+            if card and not str(card.get("name", "")).isdigit():
+                result_map[string_id] = self._name_index.get(
+                    card.get(DATA_FIELD_NAME), card
+                )
             elif self._retrieve_unknown:
                 unresolved_local_ids.append(string_id)
 
@@ -398,9 +419,9 @@ class Dataset:
                     and display_name != string_id
                     and display_name in self._name_index
                 ):
-                    matched_card = dict(self._name_index[display_name])
-                    ratings[string_id] = matched_card
-                    result_map[string_id] = matched_card
+                    result_map[string_id] = self._remember(
+                        ratings, string_id, dict(self._name_index[display_name])
+                    )
                 elif display_name == string_id and string_id.isdigit():
                     # The DB lookup failed completely. Mark it for Scryfall bulk fetch.
                     if string_id not in unknown_ids_to_fetch:
@@ -445,8 +466,7 @@ class Dataset:
                     from src.file_extractor import initialize_card_data
 
                     initialize_card_data(empty_dict)
-                    ratings[string_id] = empty_dict
-                    result_map[string_id] = empty_dict
+                    result_map[string_id] = self._remember(ratings, string_id, empty_dict)
 
         # Bulk Scryfall Fallback for any IDs that the local database couldn't find
         if unknown_ids_to_fetch:
@@ -479,11 +499,9 @@ class Dataset:
                             is_basic = "Basic" in types and "Land" in types
 
                             if name in self._name_index:
-                                matched_card = dict(self._name_index[name])
-                                ratings[aid] = matched_card
-                                result_map[aid] = matched_card
-                                # Store it in the fallback cache so we don't have to look it up next launch
-                                self._fallback_ratings[aid] = matched_card
+                                result_map[aid] = self._remember(
+                                    ratings, aid, dict(self._name_index[name])
+                                )
                                 made_new_cache_entries = True
                             else:
                                 from src.file_extractor import extract_types
@@ -501,10 +519,7 @@ class Dataset:
                                     DATA_SECTION_IMAGES: [],
                                 }
                                 initialize_card_data(empty_dict)
-                                ratings[aid] = empty_dict
-                                result_map[aid] = empty_dict
-
-                                self._fallback_ratings[aid] = empty_dict
+                                result_map[aid] = self._remember(ratings, aid, empty_dict)
                                 made_new_cache_entries = True
 
                             if aid in unknown_ids_to_fetch:

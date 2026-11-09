@@ -220,6 +220,12 @@ class AppController:
             draft_id = self.orchestrator.scanner.current_draft_id
             start_time = self.orchestrator.scanner.draft_start_time
             event_string = self.orchestrator.scanner.event_string
+            cards_per_pick = getattr(self.orchestrator.scanner, "cards_per_pick", 1)
+            if not isinstance(cards_per_pick, int):
+                cards_per_pick = 1
+            number_of_players = getattr(self.orchestrator.scanner, "number_of_players", 8)
+            if not isinstance(number_of_players, int):
+                number_of_players = 8
         finally:
             self.orchestrator.scanner.lock.release()
 
@@ -232,6 +238,9 @@ class AppController:
             len(taken_cards),
             id(metrics),
             pack_names,
+            cards_per_pick,
+            number_of_players,
+            self.config.settings.advisor_enabled,
         )
 
         if hasattr(self, "_advisor_cache") and advisor_key in self._advisor_cache:
@@ -246,8 +255,17 @@ class AppController:
                 for c, v in sig_calc.calculate_pack_signals(h_pack, entry["Pick"]).items():
                     scores[c] += v
 
-            advisor = DraftAdvisor(metrics, taken_cards, signals=scores)
-            recommendations = advisor.evaluate_pack(pack_cards, pi, current_pack=pk)
+            if self.config.settings.advisor_enabled:
+                advisor = DraftAdvisor(metrics, taken_cards, signals=scores)
+                recommendations = advisor.evaluate_pack(
+                    pack_cards,
+                    pi,
+                    current_pack=pk,
+                    cards_per_pick=cards_per_pick,
+                    number_of_players=number_of_players,
+                )
+            else:
+                recommendations = []
             if not hasattr(self, "_advisor_cache"):
                 self._advisor_cache = {}
             self._advisor_cache[advisor_key] = (scores, recommendations)

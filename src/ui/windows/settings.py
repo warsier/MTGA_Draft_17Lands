@@ -110,6 +110,7 @@ class SettingsWindow(tkinter.Toplevel):
 
         features = [
             ("Always On Top", "always_on_top"),
+            ("Show Draft Advisor", "advisor_enabled"),
             ("Auto-Sync Cloud Datasets", "auto_sync_datasets"),
             ("Highlight Row by Mana Cost", "card_colors_enabled"),
             ("Check for Dataset Updates", "update_notifications_enabled"),
@@ -187,6 +188,7 @@ class SettingsWindow(tkinter.Toplevel):
         # Checkbox logic
         checkbox_keys = [
             "always_on_top",
+            "advisor_enabled",
             "auto_sync_datasets",
             "card_colors_enabled",
             "update_notifications_enabled",

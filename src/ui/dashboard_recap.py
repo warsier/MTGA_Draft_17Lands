@@ -11,7 +11,7 @@ import threading
 from src import constants
 from src.ui.styles import Theme
 from src.utils import open_file
-from src.ui.components import ManaCurvePlot, TypePieChart
+from src.ui.components import ManaCurvePlot, TypePieChart, VerticalScrolledFrame
 from src.card_logic import get_deck_metrics, identify_top_pairs
 
 
@@ -20,27 +20,41 @@ class DraftRecapScreen(ttk.Frame):
         super().__init__(parent)
         self.launch_sealed_callback = launch_sealed_callback
         self._dynamic_wrap_labels = []
+        self.tab_scrollers = []
         self._build_ui()
-        self.bind("<Configure>", self._on_resize)
-
-    def _on_resize(self, event):
-        if event.widget == self:
-            if getattr(self, "_last_recap_width", None) == event.width:
-                return
-            self._last_recap_width = event.width
-            if event.width > 100:
-                wrap_len = min(550, max(300, event.width - 60))
-                for lbl in self._dynamic_wrap_labels:
-                    if lbl.winfo_exists():
-                        lbl.configure(wraplength=wrap_len)
 
     def _create_stat_box(self, parent, title, text_var_name):
         frame = ttk.Labelframe(parent, text=title, padding=Theme.scaled_val(8))
-        lbl = ttk.Label(frame, text="", font=Theme.scaled_font(9), justify="left")
+        lbl = ttk.Label(
+            frame,
+            text="",
+            font=Theme.scaled_font(9),
+            justify="left",
+            anchor="nw",
+            wraplength=Theme.scaled_val(300),
+        )
         lbl.pack(anchor="nw", fill="both", expand=True)
+        frame.bind(
+            "<Configure>",
+            lambda e, label=lbl: self._wrap_to_width(label, e.width),
+        )
         setattr(self, text_var_name, lbl)
         self._dynamic_wrap_labels.append(lbl)
         return frame
+
+    @staticmethod
+    def _wrap_to_width(label, width):
+        pad = Theme.scaled_val(20)
+        if width > pad + 40:
+            label.configure(wraplength=width - pad)
+
+    def _add_tab(self, text):
+        scroller = VerticalScrolledFrame(
+            self.recap_notebook, padding=Theme.scaled_val(15)
+        )
+        self.recap_notebook.add(scroller, text=text)
+        self.tab_scrollers.append(scroller)
+        return scroller.content
 
     def _build_ui(self):
         self.columnconfigure(0, weight=1)
@@ -82,8 +96,7 @@ class DraftRecapScreen(ttk.Frame):
         )
 
         # --- TAB 1: DRAFT RECAP ---
-        tab_recap = ttk.Frame(self.recap_notebook, padding=Theme.scaled_val(15))
-        self.recap_notebook.add(tab_recap, text=" 🏆 Draft Recap ")
+        tab_recap = self._add_tab(" 🏆 Draft Recap ")
 
         top_recap = ttk.Frame(tab_recap)
         top_recap.pack(fill="x", pady=Theme.scaled_val((0, 10)))
@@ -107,7 +120,7 @@ class DraftRecapScreen(ttk.Frame):
 
         grid_recap = ttk.Frame(tab_recap)
         grid_recap.pack(fill="both", expand=True)
-        grid_recap.columnconfigure((0, 1), weight=1)
+        grid_recap.columnconfigure((0, 1), weight=1, uniform="recap_col")
         grid_recap.rowconfigure((0, 1), weight=1)
 
         self._create_stat_box(
@@ -124,12 +137,11 @@ class DraftRecapScreen(ttk.Frame):
         ).grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
 
         # --- TAB 2: SYNERGY & ROLES ---
-        tab_synergy = ttk.Frame(self.recap_notebook, padding=Theme.scaled_val(15))
-        self.recap_notebook.add(tab_synergy, text=" 🧩 Synergy & Roles ")
+        tab_synergy = self._add_tab(" 🧩 Synergy & Roles ")
 
         grid_synergy = ttk.Frame(tab_synergy)
         grid_synergy.pack(fill="both", expand=True)
-        grid_synergy.columnconfigure((0, 1), weight=1)
+        grid_synergy.columnconfigure((0, 1), weight=1, uniform="synergy_col")
         grid_synergy.rowconfigure((0, 1), weight=1)
 
         self._create_stat_box(
@@ -146,9 +158,8 @@ class DraftRecapScreen(ttk.Frame):
         ).grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
 
         # --- TAB 3: MANA & CURVE ---
-        tab_analysis = ttk.Frame(self.recap_notebook, padding=Theme.scaled_val(15))
-        self.recap_notebook.add(tab_analysis, text=" 📊 Mana & Curve ")
-        tab_analysis.columnconfigure((0, 1), weight=1)
+        tab_analysis = self._add_tab(" 📊 Mana & Curve ")
+        tab_analysis.columnconfigure((0, 1), weight=1, uniform="analysis_col")
         tab_analysis.rowconfigure(0, weight=1)
 
         charts_frame = ttk.Frame(tab_analysis)
@@ -179,6 +190,9 @@ class DraftRecapScreen(ttk.Frame):
         self._create_stat_box(stats_col, "RARES & MYTHICS", "lbl_recap_rares").pack(
             fill="both", expand=True, pady=Theme.scaled_val((0, 10))
         )
+
+        for scroller in self.tab_scrollers:
+            scroller.bind_mousewheel()
 
     def update_summary(self, taken_cards, metrics, draft_id, event_type, deck_metrics=None):
         if not taken_cards or len(taken_cards) < 40:

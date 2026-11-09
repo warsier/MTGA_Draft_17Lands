@@ -16,6 +16,9 @@ from typing import Any, Optional
 from tkinter import font as tkfont
 from src.constants import RESOURCE_DIR
 
+if hasattr(ttk, "enable_global_api"):
+    ttk.enable_global_api()
+
 logger = logging.getLogger(__name__)
 
 import tkinter.ttk as tk_ttk
@@ -324,7 +327,10 @@ class Theme:
                 cls.BG_PRIMARY = sys_bg if sys_bg else colors.bg
 
                 # Ensure zebra striping uses a highly subtle background tint
-                if getattr(style.theme, "type", "dark") == "light":
+                theme_mode = getattr(style.theme, "mode", None) or getattr(
+                    style.theme, "type", "dark"
+                )
+                if theme_mode == "light":
                     cls.BG_SECONDARY = colors.light
                 else:
                     cls.BG_SECONDARY = colors.dark

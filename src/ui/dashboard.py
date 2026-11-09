@@ -519,6 +519,7 @@ class DashboardFrame(ttk.Frame):
         )
         self.type_chart = TypePieChart(self.pool_container.content_frame)
         self.type_chart.pack(fill="x")
+        self.set_advisor_visible(self.configuration.settings.advisor_enabled)
 
     def _update_dashboard_state(self):
         """Evaluates the application data and smoothly swaps the active frame."""
@@ -697,21 +698,13 @@ class DashboardFrame(ttk.Frame):
                     is_picked = True
 
             display_name = name
-            if rec:
-                if rec.is_elite:
-                    display_name = f"⭐ {name}"
-                    row_tag = (
-                        "elite_bomb"
-                        if not self.configuration.settings.card_colors_enabled
-                        else row_tag
-                    )
-                elif rec.archetype_fit == "High":
-                    display_name = f"[+] {name}"
-                    row_tag = (
-                        "high_fit"
-                        if not self.configuration.settings.card_colors_enabled
-                        else row_tag
-                    )
+            if rec and rec.is_elite:
+                display_name = f"⭐ {name}"
+                row_tag = (
+                    "elite_bomb"
+                    if not self.configuration.settings.card_colors_enabled
+                    else row_tag
+                )
 
             if is_picked:
                 row_tag = "picked"
@@ -856,6 +849,19 @@ class DashboardFrame(ttk.Frame):
     def update_recommendations(self, recs):
         if hasattr(self, "advisor_panel"):
             self.advisor_panel.update_recommendations(recs)
+
+    def set_advisor_visible(self, visible: bool):
+        if not hasattr(self, "advisor_panel"):
+            return
+        if visible:
+            self.advisor_panel.pack(
+                fill="x",
+                pady=(Theme.scaled_val(10), Theme.scaled_val(15)),
+                padx=(0, Theme.scaled_val(10)),
+                before=self.signal_container,
+            )
+        else:
+            self.advisor_panel.pack_forget()
 
     def _on_sash_drag_end(self, event):
         try:

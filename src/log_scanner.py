@@ -463,7 +463,11 @@ class ArenaScanner:
         return update, event_type, draft_id
 
     def __check_special_event(self, event_name):
-        for event in self.set_list.special_events:
+        for event in sorted(
+            self.set_list.special_events,
+            key=lambda event: len(event.keywords),
+            reverse=True,
+        ):
             if event.type in constants.LIMITED_TYPES_DICT and all(
                 x in event_name for x in event.keywords
             ):
@@ -493,7 +497,10 @@ class ArenaScanner:
         upper_name = event_name.upper().replace("_", "")
 
         events = [
-            i for i in constants.LIMITED_TYPES_DICT for x in event_sections if i in x
+            i
+            for i in sorted(constants.LIMITED_TYPES_DICT, key=len, reverse=True)
+            for x in event_sections
+            if i in x
         ]
         if not events:
             # Check for Bot / Quick Draft (e.g. Y26_FRA_Bot_Draft_20261017, Quick_Draft, etc.)
@@ -735,6 +742,9 @@ class ArenaScanner:
                     self.draft_type = constants.LIMITED_TYPE_DRAFT_PICK_TWO_QUICK
                 else:
                     self.draft_type = constants.LIMITED_TYPE_DRAFT_PICK_TWO
+                self.initial_pack = self.initial_pack[:4]
+                self.pack_cards = self.pack_cards[:4]
+                self.picked_cards = self.picked_cards[:4]
 
             # Enforce maximum cards per pick to prevent MTGA JSON array-bloat bugs
             cards = cards[: self.cards_per_pick]
@@ -1063,7 +1073,7 @@ class ArenaScanner:
                 )
                 if len(picked_list) > len(self.taken_cards):
                     self.taken_cards = picked_list
-                    self.picked_cards[0] = self.taken_cards
+                    self.picked_cards[0] = list(picked_list)
                     changed = True
             return changed
 

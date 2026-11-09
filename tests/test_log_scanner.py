@@ -593,9 +593,9 @@ def test_constants_display_version_and_manifest():
     """Verify DISPLAY_VERSION contains -homebrew and remote manifest points to unrealities."""
     from src import constants
 
-    assert constants.APPLICATION_VERSION == "4.24"
+    assert constants.APPLICATION_VERSION == "4.31"
     assert constants.APPLICATION_TAG == "homebrew"
-    assert constants.DISPLAY_VERSION == "4.24-homebrew"
+    assert constants.DISPLAY_VERSION == "4.31-homebrew"
     assert "unrealities.github.io" in constants.REMOTE_MANIFEST_URL
     assert "unrealities.github.io" in constants.REMOTE_DATASET_BASE_URL
 

@@ -275,6 +275,15 @@ class CompactOverlay(tb.Toplevel):
         self.type_chart.pack(fill=X, pady=(0, Theme.scaled_val(15)))
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        self.set_advisor_visible(self.configuration.settings.advisor_enabled)
+
+    def set_advisor_visible(self, visible: bool):
+        try:
+            self.notebook.tab(
+                self.tab_advisor, state="normal" if visible else "hidden"
+            )
+        except Exception:
+            pass
 
     def _on_tab_changed(self, event):
         """Forces Tkinter to redraw the contents of the newly selected tab."""
@@ -493,15 +502,10 @@ class CompactOverlay(tb.Toplevel):
                         is_picked = True
 
                 display_name = name
-                if rec:
-                    if rec.is_elite:
-                        display_name = f"⭐ {name}"
-                        if not self.configuration.settings.card_colors_enabled:
-                            row_tag = "elite_bomb"
-                    elif rec.archetype_fit == "High":
-                        display_name = f"[+] {name}"
-                        if not self.configuration.settings.card_colors_enabled:
-                            row_tag = "high_fit"
+                if rec and rec.is_elite:
+                    display_name = f"⭐ {name}"
+                    if not self.configuration.settings.card_colors_enabled:
+                        row_tag = "elite_bomb"
 
                 if is_picked:
                     row_tag = "picked"
@@ -575,7 +579,6 @@ class CompactOverlay(tb.Toplevel):
                 if (
                     not self.configuration.settings.card_colors_enabled
                     and "elite" not in row["tag"]
-                    and "high" not in row["tag"]
                 ):
                     row["tag"] = "bw_odd" if i % 2 == 0 else "bw_even"
                 tree.insert(
@@ -664,7 +667,6 @@ class CompactOverlay(tb.Toplevel):
                 card_name = (
                     str(item_vals[name_idx])
                     .replace("⭐ ", "")
-                    .replace("[+] ", "")
                     .replace("..", "")
                     .strip()
                 )

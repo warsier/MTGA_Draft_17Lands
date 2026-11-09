@@ -11,6 +11,7 @@ from tkinter import ttk
 import ttkbootstrap as tb
 from typing import Dict, Any, List
 import random
+import queue
 import requests
 import urllib.parse
 import hashlib
@@ -462,34 +463,7 @@ class SuggestDeckPanel(ttk.Frame):
         )
         dataset_name = self.configuration.card_data.latest_dataset
 
-        def _progress_cb(msg):
-            if not self.winfo_exists():
-                return
-            if "status" in msg:
-                if not self.suggestions:
-                    self.after(0, lambda: self.var_archetype.set(msg["status"]))
-                if getattr(self, "app_context", None) and hasattr(
-                    self.app_context, "loading_overlay"
-                ):
-                    self.after(
-                        0,
-                        lambda: self.app_context.loading_overlay.update_status(
-                            msg["status"]
-                        ),
-                    )
-            elif "variant_label" in msg:
-                lbl = msg["variant_label"]
-                vd = msg["variant_data"]
-
-                def _update_ui():
-                    self.suggestions[lbl] = vd
-                    self.incremental_labels.append(lbl)
-                    self._update_dropdown_options(self.incremental_labels)
-
-                    if len(self.incremental_labels) == 1:
-                        self._on_deck_selection_change(lbl)
-
-                self.after(0, _update_ui)
+        progress_queue = queue.Queue()
 
         def _worker():
             try:
@@ -500,16 +474,48 @@ class SuggestDeckPanel(ttk.Frame):
                     metrics,
                     self.configuration,
                     event_type,
-                    _progress_cb,
+                    progress_queue.put,
                     dataset_name,
                 )
-                self.after(0, lambda: self._finalize_build(raw_results))
+                progress_queue.put(("done", raw_results))
             except Exception as e:
-                # Bind the message now: `e` is unbound once the except block
-                # exits, before Tk runs the callback.
-                self.after(0, lambda msg=str(e): self._handle_builder_error(msg))
+                progress_queue.put(("error", str(e)))
 
         self.sim_executor.submit(_worker)
+        self._drain_progress(progress_queue)
+
+    def _drain_progress(self, progress_queue):
+        """Drains worker messages on the Tk main thread so worker threads never call into Tcl."""
+        if not self.winfo_exists():
+            return
+        try:
+            while True:
+                msg = progress_queue.get_nowait()
+                if isinstance(msg, tuple):
+                    kind, payload = msg
+                    if kind == "done":
+                        self._finalize_build(payload)
+                    else:
+                        self._handle_builder_error(payload)
+                    return
+                if "status" in msg:
+                    if not self.suggestions:
+                        self.var_archetype.set(msg["status"])
+                    if getattr(self, "app_context", None) and hasattr(
+                        self.app_context, "loading_overlay"
+                    ):
+                        self.app_context.loading_overlay.update_status(msg["status"])
+                elif "variant_label" in msg:
+                    lbl = msg["variant_label"]
+                    self.suggestions[lbl] = msg["variant_data"]
+                    self.incremental_labels.append(lbl)
+                    self._update_dropdown_options(self.incremental_labels)
+                    if len(self.incremental_labels) == 1:
+                        self._on_deck_selection_change(lbl)
+        except queue.Empty:
+            pass
+        if self.is_building:
+            self.after(20, lambda: self._drain_progress(progress_queue))
 
     def _finalize_build(self, sorted_decks):
         self.is_building = False
