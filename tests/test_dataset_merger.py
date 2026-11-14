@@ -216,3 +216,103 @@ def test_merge_dataset_files_and_auto_merge(tmp_path):
     # Re-running when up to date should make no changes
     re_created = auto_merge_local_draft_datasets(str(tmp_path))
     assert len(re_created) == 0
+
+
+def test_merge_card_stats_skips_suppressed_zero_rates_and_preserves_iwd():
+    """Reproduces TRK Astute Terraformer bug: Contender has suppressed gihwr/iwd=0.0
+    (samples < 500) alongside valid gnswr/gpwr."""
+    premier = {
+        "samples": 6822,
+        "game_count": 16027,
+        "seen_count": 10000,
+        "pick_count": 2000,
+        "gihwr": 58.06,
+        "gnswr": 56.67,
+        "iwd": 1.4,
+        "gpwr": 57.22,
+        "ohwr": 59.10,
+        "gdwr": 57.40,
+        "alsa": 4.20,
+        "ata": 4.80,
+        "play_rate": 72.0,
+    }
+    contender = {
+        "samples": 489,
+        "game_count": 1068,
+        "seen_count": 500,
+        "pick_count": 100,
+        "gihwr": 0.0,
+        "gnswr": 62.74,
+        "iwd": 0.0,
+        "gpwr": 62.08,
+        "ohwr": 0.0,
+        "gdwr": 0.0,
+        "alsa": 0.0,
+        "ata": 0.0,
+        "play_rate": 0.0,
+    }
+
+    merged = merge_card_stats(premier, contender)
+
+    assert merged["samples"] == 7311
+    assert merged["game_count"] == 17095
+    # Suppressed 0.0 rates in Contender must NOT dilute Premier's valid rates
+    assert merged["gihwr"] == 58.06
+    assert merged["ohwr"] == 59.10
+    assert merged["gdwr"] == 57.40
+    assert merged["alsa"] == 4.20
+    assert merged["ata"] == 4.80
+    assert merged["play_rate"] == 72.0
+    # Valid Contender GPWR and GNSWR are pooled by their respective game counts
+    assert merged["gpwr"] == 57.52
+    assert merged["gnswr"] == 57.03
+    # IWD must NOT be inverted to -2.85 by 0.0-diluted GIHWR or baseline shift
+    assert merged["iwd"] == 1.4
+
+
+def test_merge_card_stats_iwd_avoids_simpsons_paradox():
+    """When two formats have different player-skill baselines and draw rates,
+    pooling within-format IWD avoids Simpson's paradox."""
+    premier = {
+        "samples": 1000,
+        "game_count": 2000,  # 50% draw rate
+        "gihwr": 56.0,
+        "gnswr": 54.0,
+        "iwd": 2.0,
+    }
+    contender = {
+        "samples": 500,
+        "game_count": 2000,  # 25% draw rate, +6% higher baseline WR
+        "gihwr": 62.0,
+        "gnswr": 60.0,
+        "iwd": 2.0,
+    }
+
+    merged = merge_card_stats(premier, contender)
+    assert merged["iwd"] == 2.0
+
+
+def test_auto_merge_regenerates_stale_merger_version(tmp_path):
+    """Merged Draft files missing current merger_version must be re-merged automatically."""
+    p_data = {
+        "meta": {"game_count": 100, "start_date": "2026-10-01", "end_date": "2026-10-10", "version": 3.0},
+        "color_ratings": {},
+        "card_ratings": {},
+    }
+    c_data = {
+        "meta": {"game_count": 50, "start_date": "2026-10-01", "end_date": "2026-10-10", "version": 3.0},
+        "color_ratings": {},
+        "card_ratings": {},
+    }
+    p_file = tmp_path / "TRK_PremierDraft_All_Data.json"
+    c_file = tmp_path / "TRK_ContenderDraft_All_Data.json"
+    out_file = tmp_path / "TRK_Draft_All_Data.json"
+
+    p_file.write_text(json.dumps(p_data), encoding="utf-8")
+    c_file.write_text(json.dumps(c_data), encoding="utf-8")
+    # Write a legacy merged file (newer mtime, no merger_version)
+    out_file.write_text(json.dumps({"meta": {"game_count": 150}, "color_ratings": {}, "card_ratings": {}}), encoding="utf-8")
+
+    created = auto_merge_local_draft_datasets(str(tmp_path))
+    assert len(created) == 1
+    assert '"merger_version": 2' in out_file.read_text(encoding="utf-8")[:1024]

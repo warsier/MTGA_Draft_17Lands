@@ -12,11 +12,14 @@ from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
+# Increment whenever merge math changes so cached local Draft files re-merge automatically.
+MERGER_VERSION = 2
+
 
 def merge_card_stats(stats_a: Dict[str, Any], stats_b: Dict[str, Any]) -> Dict[str, Any]:
     """
     Merge statistical metrics for a single card under a specific color archetype.
-    Rates are weighted by their underlying sample sizes.
+    Rates are weighted by their underlying sample sizes, skipping suppressed (0.0) rates.
     """
     if not stats_a and not stats_b:
         return {}
@@ -48,81 +51,106 @@ def merge_card_stats(stats_a: Dict[str, Any], stats_b: Dict[str, Any]) -> Dict[s
         "pick_count": total_pick,
     }
 
-    # Helper for weighted rate
-    def _weighted(rate_a, weight_a, rate_b, weight_b, total_weight, decimals=2):
-        if total_weight <= 0:
+    # Helper for weighted positive rate: 17Lands stores 0.0 when a rate is suppressed
+    # for insufficient samples even though sample/game counts are non-zero.
+    def _weighted(rate_a, weight_a, rate_b, weight_b, decimals=2):
+        val_a = float(rate_a or 0.0)
+        val_b = float(rate_b or 0.0)
+        eff_a = weight_a if val_a > 0.0 and weight_a > 0 else 0
+        eff_b = weight_b if val_b > 0.0 and weight_b > 0 else 0
+        eff_total = eff_a + eff_b
+        if eff_total <= 0:
             return 0.0
-        val = (float(rate_a or 0.0) * weight_a + float(rate_b or 0.0) * weight_b) / total_weight
+        val = (val_a * eff_a + val_b * eff_b) / eff_total
         return round(val, decimals)
 
     # GIHWR (weighted by GIH samples)
     merged["gihwr"] = _weighted(
         stats_a.get("gihwr"), samples_a,
         stats_b.get("gihwr"), samples_b,
-        total_samples, decimals=2
+        decimals=2,
     )
 
     # GPWR (weighted by games played)
     merged["gpwr"] = _weighted(
         stats_a.get("gpwr"), games_a,
         stats_b.get("gpwr"), games_b,
-        total_games, decimals=2
+        decimals=2,
     )
 
     # OHWR & GDWR (weighted by samples)
     merged["ohwr"] = _weighted(
         stats_a.get("ohwr"), samples_a,
         stats_b.get("ohwr"), samples_b,
-        total_samples, decimals=2
+        decimals=2,
     )
     merged["gdwr"] = _weighted(
         stats_a.get("gdwr"), samples_a,
         stats_b.get("gdwr"), samples_b,
-        total_samples, decimals=2
+        decimals=2,
     )
 
     # GNSWR (weighted by games not seen: game_count - samples)
     gns_a = max(0, games_a - samples_a)
     gns_b = max(0, games_b - samples_b)
-    total_gns = gns_a + gns_b
     merged["gnswr"] = _weighted(
         stats_a.get("gnswr"), gns_a,
         stats_b.get("gnswr"), gns_b,
-        total_gns, decimals=2
+        decimals=2,
     )
 
-    # IWD: Improvement When Drawn (GIHWR - GNSWR)
-    if merged["gihwr"] > 0.0 and merged["gnswr"] > 0.0:
+    # IWD: Pool within-format (GIHWR - GNSWR) across datasets that have both rates
+    # so cross-format player-skill baselines cannot invert or dilute IWD.
+    def _extract_valid_iwd(stats: Dict[str, Any]):
+        gih = float(stats.get("gihwr") or 0.0)
+        gns = float(stats.get("gnswr") or 0.0)
+        raw_iwd = stats.get("iwd")
+        if gih > 0.0 and gns > 0.0:
+            if raw_iwd is not None and (float(raw_iwd) != 0.0 or abs(gih - gns) < 0.02):
+                return True, float(raw_iwd)
+            return True, gih - gns
+        if raw_iwd is not None and float(raw_iwd) != 0.0:
+            return True, float(raw_iwd)
+        return False, 0.0
+
+    has_iwd_a, iwd_a = _extract_valid_iwd(stats_a)
+    has_iwd_b, iwd_b = _extract_valid_iwd(stats_b)
+    w_iwd_a = (samples_a if samples_a > 0 else games_a) if has_iwd_a else 0
+    w_iwd_b = (samples_b if samples_b > 0 else games_b) if has_iwd_b else 0
+    total_iwd_w = w_iwd_a + w_iwd_b
+
+    if total_iwd_w > 0:
+        merged["iwd"] = round((iwd_a * w_iwd_a + iwd_b * w_iwd_b) / total_iwd_w, 2)
+    elif has_iwd_a and not has_iwd_b:
+        merged["iwd"] = round(iwd_a, 2)
+    elif has_iwd_b and not has_iwd_a:
+        merged["iwd"] = round(iwd_b, 2)
+    elif merged["gihwr"] > 0.0 and merged["gnswr"] > 0.0:
         merged["iwd"] = round(merged["gihwr"] - merged["gnswr"], 2)
     else:
-        merged["iwd"] = _weighted(
-            stats_a.get("iwd"), total_samples,
-            stats_b.get("iwd"), total_samples,
-            total_samples * 2 if total_samples > 0 else 0, decimals=2
-        )
+        merged["iwd"] = 0.0
 
     # ALSA (weighted by seen_count)
     merged["alsa"] = _weighted(
         stats_a.get("alsa"), seen_a,
         stats_b.get("alsa"), seen_b,
-        total_seen, decimals=2
+        decimals=2,
     )
 
     # ATA (weighted by pick_count)
     merged["ata"] = _weighted(
         stats_a.get("ata"), pick_a,
         stats_b.get("ata"), pick_b,
-        total_pick, decimals=2
+        decimals=2,
     )
 
     # Play Rate (weighted by pick_count if available, otherwise game_count)
     pr_weight_a = pick_a if pick_a > 0 else games_a
     pr_weight_b = pick_b if pick_b > 0 else games_b
-    total_pr_weight = pr_weight_a + pr_weight_b
     merged["play_rate"] = _weighted(
         stats_a.get("play_rate"), pr_weight_a,
         stats_b.get("play_rate"), pr_weight_b,
-        total_pr_weight, decimals=2
+        decimals=2,
     )
 
     return merged
@@ -191,6 +219,7 @@ def merge_datasets(
         "end_date": end_date,
         "version": max(float(meta_p.get("version", 3.0)), float(meta_s.get("version", 3.0))),
         "game_count": total_games,
+        "merger_version": MERGER_VERSION,
         "merged_from": [
             meta_p.get("format", "PremierDraft"),
             meta_s.get("format", "ContenderDraft"),
@@ -300,7 +329,13 @@ def auto_merge_local_draft_datasets(sets_folder: str = None) -> list[str]:
                 if os.path.exists(out_file):
                     out_mtime = os.path.getmtime(out_file)
                     if out_mtime >= latest_src_mtime:
-                        needs_merge = False
+                        try:
+                            with open(out_file, "r", encoding="utf-8") as f_hdr:
+                                head = f_hdr.read(1024)
+                            if f'"merger_version": {MERGER_VERSION}' in head:
+                                needs_merge = False
+                        except OSError:
+                            needs_merge = True
 
                 if needs_merge:
                     try:

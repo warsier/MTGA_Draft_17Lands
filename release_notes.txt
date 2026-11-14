@@ -1,5 +1,6 @@
 ===================== RELEASE NOTES 4.31-homebrew =====================
 * warsier: [Feature] Merged Draft (Premier + Contender) dataset engine and default selection for draft sessions, combining 17Lands telemetry across Premier and Contender Draft.
+* warsier: [Bug] Fixed dataset merger (`Draft`) diluting win rates and inverting `IWD` when one format has sub-threshold (`0.0`) suppressed rates; pools within-format `IWD` directly and auto-regenerates stale local merged datasets (`merger_version: 2`).
 * warsier: [Feature] Top-bar Set Selector dropdown with automatic Alchemy-to-parent set fallback (e.g. YFRA -> FRA) when Alchemy telemetry is sparse.
 * unrealities: [Bug] The daily dataset ETL reads 17Lands' format catalog from www.17lands.com. The api.17lands.com host stopped answering on 2026-11-07, which halted the scheduled run before it fetched anything; the published datasets were untouched (#249).
 * JamesYouL2: [Bug] Resolved card IDs now cache metadata without win rates. Alternate printings use the active dataset's ratings by name, so switching sets, event formats, user groups or time periods no longer carries old statistics into the new dataset. Cards without matching ratings remain visible but unrated (#242).
